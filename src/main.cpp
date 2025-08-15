@@ -194,7 +194,7 @@ void generate_launch_json(const fs::path& vscode_dir, const std::string& project
     "version": "0.2.0",
     "configurations": [
         {
-            "name": "(gdb) Launch",
+            "name": "Debug Launch",
             "type": "cppdbg",
             "request": "launch",
             "program": "${workspaceFolder}/build/bin/Debug/)" << project_name << R"(",
@@ -202,9 +202,9 @@ void generate_launch_json(const fs::path& vscode_dir, const std::string& project
             "stopAtEntry": false,
             "cwd": "${workspaceFolder}",
             "environment": [],
-            "externalConsole": false,
-            "MIMode": "gdb",
-            "miDebuggerPath": "/usr/bin/gdb",
+            "externalConsole": true,
+            "MIMode": "your MI mode for example:gdb",
+            "miDebuggerPath": "your MI path",
             "setupCommands": [
                 {
                     "description": "Enable pretty-printing for gdb",
