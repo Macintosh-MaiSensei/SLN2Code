@@ -1,0 +1,210 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "Build All Files (d)",
+            "type": "shell",
+            "command": "g++",
+            "args": [
+                "-g",
+                "${fileDirname}/*.cpp",
+                "-o",
+                "${workspaceFolder}/build/bin/Debug/${fileBasenameNoExtension}.exe",
+                "-include",
+                "${workspaceFolder}/include/stdafx.h",
+                "-I",
+                "F:/APP/VSCODE_CPP/include",
+                "-L${workspaceFolder}/lib",
+                "-Wall",
+                "-Wextra",
+                "-std=c++20",
+                "-fmodules-ts",
+            ],
+            "group": "build",
+            "problemMatcher": [
+                "$gcc"
+            ],
+            "detail": "编译当前所有的C++文件(64位)"
+        },
+        {
+            "label": "Build Single File (d)",
+            "type": "shell",
+            "command": "g++",
+            "args": [
+                "-include",
+                "${workspaceFolder}/include/stdafx.h",
+                "-g",
+                "${file}",
+                "-o",
+                "${workspaceFolder}/build/bin/Debug/${fileBasenameNoExtension}.exe",
+                "-I",
+                "${workspaceFolder}/include",
+                "-L${workspaceFolder}/lib",
+                "-Wall",
+                "-Wextra",
+                "-std=c++20",
+                "-fmodules-ts",
+            ],
+            "problemMatcher": [
+                "$gcc"
+            ],
+            "detail": "编译单个C++文件(64位)"
+        },
+        {
+            "label": "Build All Files (r)",
+            "type": "shell",
+            "command": "g++",
+            "args": [
+                "-g",
+                "${fileDirname}/*.cpp",
+                "-o",
+                "${workspaceFolder}/build/bin/Release/${fileBasenameNoExtension}.exe",
+                "-include",
+                "${workspaceFolder}/include/stdafx.h",
+                "-I",
+                "F:/APP/VSCODE_CPP/include",
+                "-L${workspaceFolder}/lib",
+                "-Wall",
+                "-Wextra",
+                "-std=c++20",
+                "-fmodules-ts",
+                "-O3"
+            ],
+            "group": "build",
+            "problemMatcher": [
+                "$gcc"
+            ],
+            "detail": "编译当前所有的C++文件(64位)"
+        },
+        {
+            "label": "Build Single File (r)",
+            "type": "shell",
+            "command": "g++",
+            "args": [
+                "-g",
+                "${file}",
+                "-o",
+                "${workspaceFolder}/build/bin/Release/${fileBasenameNoExtension}.exe",
+                "-I",
+                "${workspaceFolder}/include",
+                "-include",
+                "${workspaceFolder}/include/stdafx.h",
+                "-L${workspaceFolder}/lib",
+                "-Wall",
+                "-Wextra",
+                "-std=c++20",
+                "-fmodules-ts",
+                "-O3"
+            ],
+            "problemMatcher": [
+                "$gcc"
+            ],
+            "detail": "编译单个C++文件(64位)"
+        },
+        {
+            "label": "Run clang-tidy",
+            "type": "shell",
+            "command": "clang-tidy",
+            "args": [
+                "${fileDirname}/*.cpp",
+                "--",
+                "--header-insertion=iwyu",
+                "-I",
+                "${workspaceFolder}/include",
+                "-L${workspaceFolder}/lib",
+                "-std=c++20"
+            ],
+            "problemMatcher": [],
+            "group": "test",
+            "detail": "对当前文件运行 clang-tidy 静态分析"
+        },
+        {
+            "label": "clang++ Build All Files (d)",
+            "type": "shell",
+            "command": "clang++",
+            "args": [
+                "-g",
+                "${fileDirname}/*.cpp",
+                "-o",
+                "${workspaceFolder}/build/bin/Debug/${fileBasenameNoExtension}.exe",
+                "-I",
+                "F:/APP/VSCODE_CPP/include",
+                "-L${workspaceFolder}/lib",
+                "-Wall",
+                "-Wextra",
+                "-std=c++20",
+            ],
+            "group": "build",
+            "problemMatcher": [
+                "$gcc"
+            ],
+            "detail": "编译当前所有的C++文件(64位)"
+        },
+        {
+            "label": "clang++ Build Single File (d)",
+            "type": "shell",
+            "command": "clang++",
+            "args": [
+                "-g",
+                "${file}",
+                "-o",
+                "${workspaceFolder}/build/bin/Debug/${fileBasenameNoExtension}.exe",
+                "-I",
+                "${workspaceFolder}/include",
+                "-L${workspaceFolder}/lib",
+                "-Wall",
+                "-Wextra",
+                "-std=c++20",
+            ],
+            "problemMatcher": [
+                "$gcc"
+            ],
+            "detail": "编译单个C++文件(64位)"
+        },
+        {
+            "label": "clang++ Build All Files (r)",
+            "type": "shell",
+            "command": "clang++",
+            "args": [
+                "-g",
+                "${fileDirname}/*.cpp",
+                "-o",
+                "${workspaceFolder}/build/bin/Release/${fileBasenameNoExtension}.exe",
+                "-I",
+                "F:/APP/VSCODE_CPP/include",
+                "-L${workspaceFolder}/lib",
+                "-Wall",
+                "-Wextra",
+                "-std=c++20",
+                "-O3"
+            ],
+            "group": "build",
+            "problemMatcher": [
+                "$gcc"
+            ],
+            "detail": "编译当前所有的C++文件(64位)"
+        },
+        {
+            "label": "clang++ Build Single File (r)",
+            "type": "shell",
+            "command": "clang++",
+            "args": [
+                "-g",
+                "${file}",
+                "-o",
+                "${workspaceFolder}/build/bin/Release/${fileBasenameNoExtension}.exe",
+                "-I",
+                "${workspaceFolder}/include",
+                "-L${workspaceFolder}/lib",
+                "-Wall",
+                "-Wextra",
+                "-std=c++20",
+                "-O3"
+            ],
+            "problemMatcher": [
+                "$gcc"
+            ],
+            "detail": "编译单个C++文件(64位)"
+        },
+    ]
+}
