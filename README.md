@@ -21,6 +21,6 @@ Run
 main.exe -n your project name -p your project dir
 ```
 And  
-Double click open the CLI interface
+Double click open the CLI interface  
 
 
