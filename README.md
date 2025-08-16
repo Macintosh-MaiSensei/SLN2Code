@@ -15,3 +15,9 @@ Compile the Tool
 ```
 g++ -g main.cpp -o main.exe -std=c++17
 ```
+Run
+```
+main.exe -n your project name -p your project dir
+```
+And
+Double click open the CLI interface
