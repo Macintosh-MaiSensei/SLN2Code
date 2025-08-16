@@ -801,7 +801,7 @@ int main(int argc, char* argv[]) {
     std::cout << "Next steps:\n"
               << "  1. cd " << project_full_path << "\n"
               << "  2. code . (to open in VS Code)\n"
-              << "  3. Update compiler paths in .vscode/c_cpp_properties.json\n"
+              << "  3. Update the blank fields in tasks.json, launch.json, and c_cpp_properties.json\n"
               << "  4. Press F5 to build and debug!\n\n";
     std::cout << "Press Enter to exit...\n";
     std::cout.flush();
