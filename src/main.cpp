@@ -1,3 +1,5 @@
+/*This is the 0.99 version and does not include the -v output option*/
+
 #include <fstream>
 #include <iostream>
 #include <filesystem>
