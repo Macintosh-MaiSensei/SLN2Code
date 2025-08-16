@@ -20,7 +20,7 @@ Run
 ```
 main.exe -n your project name -p your project dir
 ```
-And  
+or  
 Double click open the CLI interface  
 
 
