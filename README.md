@@ -1,5 +1,5 @@
 # Farewell to Visual Studio SLN!
->Not all C projects need .sln shackles.         --FarewellSLN-Cpp-Starter
+>Not all C++ projects need .sln shackles.         --FarewellSLN-Cpp-Starter
 ## NoSLN-cpp-VSCode | A VSCode Project Generator
 NoSLN-cpp-VSCode is a modern C++ project scaffolding tool designed for developers using Visual Studio Code.   
 It automates the creation of standardized C++ project structures with preconfigured VSCode settings and supports integration of popular third-party libraries.
@@ -22,3 +22,5 @@ main.exe -n your project name -p your project dir
 ```
 And  
 Double click open the CLI interface
+
+
