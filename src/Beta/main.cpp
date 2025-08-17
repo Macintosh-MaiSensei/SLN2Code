@@ -721,7 +721,8 @@ int main(int argc, char* argv[]) {
             }
         }
         else if (arg == "-v" || arg == "--version") {
-            std::cout << "Project Initializer v" << VERSION << std::endl;
+            std::cout << "Version:" << VERSION << " Beta1"<<std::endl;
+            std::cout << "Developer:";
             return 0; // 显示版本后直接退出
         }
         if (arg == "-I" || arg == "--install") {
