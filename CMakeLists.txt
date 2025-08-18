@@ -3,5 +3,4 @@ project(NoSLN-cpp-VSCode)
 
 set(CMAKE_CXX_STANDARD 26)
 
-add_executable(src main.cpp
-)
+add_executable(src main.cpp)
