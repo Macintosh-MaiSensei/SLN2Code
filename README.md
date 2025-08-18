@@ -20,6 +20,9 @@ Compile the Tool 编译工具
 ```
 g++ -g main.cpp -o main.exe -std=c++17
 ```
+or  
+Download the release pack  
+下载发布包  
 Run 运行  
 ```
 main.exe -n your project name -p your project dir
