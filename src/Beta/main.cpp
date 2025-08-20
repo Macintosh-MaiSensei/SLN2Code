@@ -334,7 +334,7 @@ public:
     static std::string hash_file(const fs::path& file_path) {
         std::ifstream file(file_path, std::ios::binary);
         if (!file) {
-            throw std::runtime_error("无法打开文件: " + file_path.string());
+            throw std::runtime_error("Can't open the file:" + file_path.string());
         }
 
         SHA256 sha;
