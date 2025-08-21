@@ -20,15 +20,14 @@ Compile the Tool 编译工具
 ```
 g++ -g main.cpp -o main.exe -std=c++17
 ```
-or  
-Download the release pack  
-下载发布包  
+or 或者  
+Download the release pack 下载发布包  
 Run 运行  
 ```
 main.exe -n your project name -p your project dir
 ```
 or 或者  
-Double click open the CLI interface  
-双击打开 CLI 界面
+Double click open the CLI interface 双击打开 CLI 界面  
+
 
 
