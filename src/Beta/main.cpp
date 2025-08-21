@@ -789,9 +789,6 @@ int main(int argc, char* argv[]) {
     // 生成基础文件
     generate_project_files(project_full_path, project_name);
 
-    // 提供库安装选项
-    offer_library_installation(project_full_path);
-
     std::cout << "\nProject \"" << project_name << "\" created successfully!\n";
     std::cout << "Configuration files generated in .vscode directory:\n";
     std::cout << "  - c_cpp_properties.json\n";
