@@ -1,8 +1,5 @@
-//
-// Created by Macintosh-MaiSensei on 2025/8/22.
-//
-/*This is the 1.00 version and does not include(-I) the -v output option*/
-
+/*Created by Macintosh-MaiSensei on 2025/8/22.*/
+/*Version 1.00 Alpha 1 */
 #include <fstream>
 #include <iostream>
 #include <filesystem>
@@ -14,6 +11,7 @@
 #include <cstdint>
 #include <sstream>
 #include <iomanip>
+#include <set>
 
 namespace fs = std::filesystem;
 
@@ -165,7 +163,7 @@ void generate_tasks_json(const fs::path& vscode_dir, const std::string& project_
             "args": [
                 "-std=c++17",
                 "-I${workspaceFolder}/include",
-                "-L${workspaceFolder}/lib",
+                "-L${workspaceFolder}/lib/**",
                 "${workspaceFolder}/src/*.cpp",
                 "-o",
                 "${workspaceFolder}/build/bin/Debug/)" << project_name << R"("
@@ -337,7 +335,7 @@ public:
     static std::string hash_file(const fs::path& file_path) {
         std::ifstream file(file_path, std::ios::binary);
         if (!file) {
-            throw std::runtime_error("无法打开文件: " + file_path.string());
+            throw std::runtime_error("Can't open the file:" + file_path.string());
         }
 
         SHA256 sha;
@@ -399,6 +397,7 @@ public:
     std::vector<std::string> dependencies;
     std::string configInstructions;
     std::string sha256;
+
 };
 
 // 支持的第三方库
@@ -551,6 +550,12 @@ void generate_library_guide(const fs::path& project_path, const ThirdPartyLibrar
 
 // 添加第三方库到项目
 void add_third_party_library(const fs::path& project_path, const std::string& lib_name) {
+    static std::set<std::string> installed_libs; // ✅ 静态变量（线程安全）
+    if (installed_libs.find(lib_name) != installed_libs.end()) {
+        std::cout << lib_name << " already installed. Skipping.\n";
+        return;
+    }
+    installed_libs.insert(lib_name);
     create_third_party_dir(project_path);
 
     // 转换为小写以匹配键
@@ -592,7 +597,16 @@ void add_third_party_library(const fs::path& project_path, const std::string& li
     std::cout << lib.name << " added successfully!\n";
     std::cout << "See docs/" << lib.name << "_GUIDE.md for usage instructions\n";
 }
-
+void install_libraries(const fs::path& project_path, const std::vector<std::string>& libs) {
+    for (const auto& lib : libs) {
+        add_third_party_library(project_path, lib); // 复用单库安装逻辑
+        try {
+            add_third_party_library(project_path, lib);
+        } catch (const std::exception& e) {
+            std::cerr << "Failed to install " << lib << ": " << e.what() << "\n";
+        }
+    }
+}
 // 在生成项目文件后添加库安装选项
 void offer_library_installation(const fs::path& project_path) {
     std::cout << "\nWould you like to add any third-party libraries? [y/N]: ";
@@ -638,12 +652,18 @@ void generate_project_files(const fs::path& project_path, const std::string& pro
     // 创建CMakeLists.txt（备用）
     {
         std::ofstream cmake(project_path / "CMakeLists.txt");
-        cmake << "cmake_minimum_required(VERSION 3.10)\n"
-              << "project(" << project_name << ")\n\n"
+        cmake << "cmake_minimum_required(VERSION 3.20)\n"
+              << "project(MyProject VERSION 1.0 LANGUAGES CXX)\n\n"
               << "set(CMAKE_CXX_STANDARD 17)\n\n"
+              <<"include(FetchContent)\n"
               << "include_directories(include)\n"
-              << "add_executable(" << project_name << " src/main.cpp)\n"
-              << "target_link_directories(" << project_name << " PRIVATE lib)\n";
+              <<"add_library(${PROJECT_NAME}_core STATIC src/main.cpp)\n"
+              <<"target_include_directories(${PROJECT_NAME}_core PUBLIC include)\n"
+              <<"add_executable(${PROJECT_NAME} src/main.cpp)\n"
+              <<"target_link_libraries(${PROJECT_NAME} PRIVATE ${PROJECT_NAME}_core)\n"
+              <<"install(TARGETS ${PROJECT_NAME} DESTINATION bin)\n"
+              <<"install(DIRECTORY include/ DESTINATION include)\n";
+
     }
 
     // 创建main.cpp
@@ -685,6 +705,8 @@ void generate_project_files(const fs::path& project_path, const std::string& pro
 int main(int argc, char* argv[]) {
     std::string project_name = "project";
     std::string base_path = fs::current_path().string();
+    const std::string VERSION = "1.0.1";
+    std::vector<std::string> libraries_to_install;
 
     // 解析命令行参数
     for (int i = 1; i < argc; ++i) {
@@ -693,24 +715,46 @@ int main(int argc, char* argv[]) {
         if (arg == "--name" || arg == "-n") {
             if (i + 1 < argc) {
                 project_name = get_valid_name(argv[++i]);
+            } else {
+                std::cerr << "Error: Missing project name after " << arg << std::endl;
+                return 1;
             }
         } else if (arg == "--path" || arg == "-p") {
             if (i + 1 < argc) {
                 base_path = clean_path(argv[++i]);
+            } else {
+                std::cerr << "Error: Missing path after " << arg << std::endl;
+                return 1;
+            }
+        } else if (arg == "-v" || arg == "--version") {
+            std::cout << "Version: " << VERSION << " Alpha1" << std::endl;
+            return 0;
+        } else if (arg == "-I" || arg == "--install") {
+            if (i + 1 < argc) {
+                libraries_to_install.push_back(argv[++i]);
+            } else {
+                std::cerr << "Error: Missing library name after " << arg << std::endl;
+                return 1;
             }
         } else if (arg == "--help" || arg == "-h") {
             std::cout << "Usage: " << argv[0] << " [options]\n"
                       << "Options:\n"
                       << "  -n, --name NAME  Set project name\n"
                       << "  -p, --path PATH  Set project path\n"
-                      << "  -h, --help       Show this help message\n";
+                      << "  -I, --install LIB  Install third-party library\n"
+                      << "  -v, --version     Output the version of the program\n"
+                      << "  -h, --help        Show this help message\n";
             return 0;
         } else {
             std::cerr << "Unknown option: " << arg << "\n";
             return 1;
         }
     }
-
+    if (project_name != "project" && base_path == fs::current_path().string()) {
+        std::cout << "Project will be created in current directory: " << base_path << "\n";
+        std::cout << "Press Enter to continue, or Ctrl+C to cancel...";
+        std::cin.get();
+    }
     // 交互式输入（如果没有通过命令行指定）
     if (project_name == "project") {
         std::cout << "Enter project name (default: project): ";
@@ -744,12 +788,16 @@ int main(int argc, char* argv[]) {
         std::cerr << "\nFailed to create project directories!\n";
         return 1;
     }
-
+    // 处理命令行指定的库安装
+    if (!libraries_to_install.empty()) {
+        for (const auto& lib_name : libraries_to_install) {
+            add_third_party_library(project_full_path, lib_name);
+        }
+    } else { // ✅ 仅当未通过命令行安装库时，才触发交互式安装
+        offer_library_installation(project_full_path);
+    }
     // 生成基础文件
     generate_project_files(project_full_path, project_name);
-
-    // 提供库安装选项
-    offer_library_installation(project_full_path);
 
     std::cout << "\nProject \"" << project_name << "\" created successfully!\n";
     std::cout << "Configuration files generated in .vscode directory:\n";
@@ -760,10 +808,12 @@ int main(int argc, char* argv[]) {
     std::cout << "Next steps:\n"
               << "  1. cd " << project_full_path << "\n"
               << "  2. code . (to open in VS Code)\n"
-              << "  3. Update compiler paths in .vscode/c_cpp_properties.json\n"
+              << "  3. Update the blank fields in tasks.json, launch.json, and c_cpp_properties.json\n"
               << "  4. Press F5 to build and debug!\n\n";
     std::cout << "Press Enter to exit...\n";
     std::cout.flush();
     std::cin.get();
     return 0;
+}
+
 }
