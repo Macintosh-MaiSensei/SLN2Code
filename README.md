@@ -1,3 +1,11 @@
+<p align="center">
+  <img src="LOGO.png" alt="FarewellSLN Logo" width="512"/>
+</p>
+
+<p align="center">
+  C++ Starter · VSCode Scaffolder · Modern Template
+</p>
+
 # Farewell to Visual Studio .sln! | 告别 Visual Studio的.sln文件！ 
 >Not all C++ projects need .sln shackles | 并非所有 C++ 项目都需要 .sln 的束缚         --FarewellSLN-Cpp-Starter  
 ## FarewellSLN-Cpp-Starter | A VSCode Project Generator
@@ -30,5 +38,4 @@ Double click open the CLI interface 双击打开 CLI 界面
 ### F.A.Q. 常见问题  
 Which platforms are supported? 支持哪些平台？  
 As long as VS Code is available, you can use it. 只要有VS Code的地方可以用它
-
 
