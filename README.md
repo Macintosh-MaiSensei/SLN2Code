@@ -1,5 +1,4 @@
-# Farewell to Visual Studio .sln!  
-# 告别 Visual Studio的.sln文件！
+# Farewell to Visual Studio .sln! | 告别 Visual Studio的.sln文件！ 
 >Not all C++ projects need .sln shackles | 并非所有 C++ 项目都需要 .sln 的束缚         --FarewellSLN-Cpp-Starter  
 ## FarewellSLN-Cpp-Starter | A VSCode Project Generator
 ## FarewellSLN-Cpp-Starter | VSCode C++项目生成器
