@@ -727,7 +727,10 @@ int main(int argc, char* argv[]) {
                 return 1;
             }
         } else if (arg == "-v" || arg == "--version") {
-            std::cout << "Version: " << VERSION << " Alpha1" << std::endl;
+			std::cout << "FarewellSLN-Cpp-Starter\n"
+                      << "Version: " << VERSION << " Alpha1\n"
+			          << "Maintainer Macintosh-Maisensei\n"
+					  << "FarewellSLN-Cpp-Starter is libre and open-source software\n";
             return 0;
         } else if (arg == "-I" || arg == "--install") {
             if (i + 1 < argc) {
