@@ -37,6 +37,7 @@ or 或者
 Double click open the CLI interface 双击打开 CLI 界面  
 ### F.A.Q. 常见问题  
 Which platforms are supported? 支持哪些平台？  
-As long as VS Code is available, you can use it. 只要有VS Code的地方可以用它
-
+As long as VS Code is available, you can use it. 只要有VS Code的地方可以用它。  
+Why can't it compile? 为什么不能编译？  
+Be sure to use -std=c++17 and above. 务必使用-std=c++17及以上选项。  
 
