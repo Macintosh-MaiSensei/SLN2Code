@@ -8,8 +8,8 @@
 
 # Farewell to Visual Studio .sln! | 告别 Visual Studio的.sln文件！ 
 >Not all C++ projects need .sln shackles | 并非所有 C++ 项目都需要 .sln 的束缚         --FarewellSLN-Cpp-Starter  
-## FarewellSLN-Cpp-Starter | A VSCode Project Generator
-## FarewellSLN-Cpp-Starter | VSCode C++项目生成器
+## SLN2Code | A VSCode Project Generator
+## SLN2Code | VSCode C++项目生成器
 FarewellSLN-Cpp-Starter is a modern C++ project scaffolding tool designed for developers using Visual Studio Code.   
 It automates the creation of standardized C++ project structures with preconfigured VSCode settings and supports integration of popular third-party libraries.  
 FarewellSLN-Cpp-Starter 是一个现代 C++ 项目脚手架工具，专为使用 Visual Studio Code 的开发人员设计。  
