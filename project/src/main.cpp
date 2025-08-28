@@ -1,5 +1,5 @@
 /*Created by Macintosh-MaiSensei on 2025/8/22.*/
-/*Version 1.00 Alpha 1 */
+/*Version 1.01 Beta*/                                                                                                                                                                                                                                                                                                                                                                                              
 #include <fstream>
 #include <iostream>
 #include <filesystem>
@@ -12,14 +12,41 @@
 #include <sstream>
 #include <iomanip>
 #include <set>
+#include <cstdlib>
+#include <unordered_set>
 
 namespace fs = std::filesystem;
-
 // 目录节点类
 class DirectoryNode {
 public:
     std::string name;
     std::vector<DirectoryNode> children;
+};
+
+// 编译器配置结构
+struct CompilerConfig {
+    std::string name;
+    std::string path;
+    std::string cppStandard;
+    std::string cStandard;
+    std::string type; // "msvc", "gcc", "clang"
+    std::vector<std::string> extraArgs;
+};
+
+// 调试器配置结构
+struct DebuggerConfig {
+    std::string name;
+    std::string path;
+    std::string type; // "gdb", "lldb", "cppvsdbg"
+};
+
+// 项目配置结构
+struct ProjectConfig {
+    std::string name;
+    std::string path;
+    CompilerConfig compiler;
+    DebuggerConfig debugger;
+    std::vector<std::string> libraries;
 };
 
 // 生成项目结构定义
@@ -53,7 +80,7 @@ std::string clean_path(const std::string& input) {
     std::replace(cleaned.begin(), cleaned.end(), '\\', '/');
 
     // 移除末尾的斜杠
-    if (!cleaned.empty() && cleaned.back() == '/') {
+    if (!cleaned.empty() && cleaned.back() == '/' && cleaned.size() > 1) {
         cleaned.pop_back();
     }
 
@@ -112,9 +139,316 @@ bool create_directory_recursive(const fs::path& base_path, const DirectoryNode& 
     }
 }
 
+// 从PATH环境变量中查找可执行文件
+std::vector<std::string> find_executables_in_path(const std::string& executable_name) {
+    std::vector<std::string> found_paths;
+    
+    // 获取PATH环境变量
+    const char* path_env = std::getenv("PATH");
+    if (!path_env) {
+        return found_paths;
+    }
+    
+    std::string path_str(path_env);
+    
+    // 分割PATH字符串
+#ifdef _WIN32
+    const char delimiter = ';';
+#else
+    const char delimiter = ':';
+#endif
+    
+    std::istringstream path_stream(path_str);
+    std::string directory;
+    
+    while (std::getline(path_stream, directory, delimiter)) {
+        fs::path dir_path(directory);
+        if (fs::exists(dir_path) && fs::is_directory(dir_path)) {
+            fs::path executable_path = dir_path / executable_name;
+#ifdef _WIN32
+            executable_path.replace_extension(".exe");
+#endif
+            if (fs::exists(executable_path) && fs::is_regular_file(executable_path)) {
+                found_paths.push_back(clean_path(executable_path.string()));
+            }
+        }
+    }
+    
+    return found_paths;
+}
+
+// 获取用户选择的编译器配置
+CompilerConfig get_compiler_config() {
+    CompilerConfig config;
+    
+    std::cout << "\n=== Compiler Configuration ===\n";
+    
+    // 选择编译器类型
+    std::cout << "Select compiler type:\n";
+    std::cout << "1. GCC\n";
+    std::cout << "2. Clang\n";
+    std::cout << "3. MSVC (Visual Studio)\n";
+    std::cout << "Enter choice (1-3, default 1): ";
+    
+    std::string choice;
+    std::getline(std::cin, choice);
+    
+    if (choice == "2") {
+        config.type = "clang";
+        config.name = "clang";
+    } else if (choice == "3") {
+        config.type = "msvc";
+        config.name = "cl";
+    } else {
+        config.type = "gcc";
+        config.name = "gcc";
+    }
+    
+    // 从PATH中查找编译器
+    std::vector<std::string> compiler_paths;
+    if (config.type == "msvc") {
+        // 对于MSVC，我们可能需要查找特定的路径
+        compiler_paths = find_executables_in_path("cl");
+        
+        // 如果在PATH中找不到，尝试常见的VS安装路径
+        if (compiler_paths.empty()) {
+#ifdef _WIN32
+            // 常见的Visual Studio安装路径
+            std::vector<std::string> common_paths = {
+                "C:/Program Files/Microsoft Visual Studio/2022/Community/VC/Tools/MSVC",
+                "C:/Program Files/Microsoft Visual Studio/2022/Professional/VC/Tools/MSVC",
+                "C:/Program Files/Microsoft Visual Studio/2022/Enterprise/VC/Tools/MSVC",
+                "C:/Program Files (x86)/Microsoft Visual Studio/2019/Community/VC/Tools/MSVC",
+                "C:/Program Files (x86)/Microsoft Visual Studio/2019/Professional/VC/Tools/MSVC",
+                "C:/Program Files (x86)/Microsoft Visual Studio/2019/Enterprise/VC/Tools/MSVC"
+            };
+            
+            for (const auto& base_path : common_paths) {
+                if (fs::exists(base_path)) {
+                    for (const auto& entry : fs::directory_iterator(base_path)) {
+                        if (entry.is_directory()) {
+                            fs::path compiler_path = entry.path() / "bin/Hostx64/x64/cl.exe";
+                            if (fs::exists(compiler_path)) {
+                                compiler_paths.push_back(clean_path(compiler_path.string()));
+                            }
+                        }
+                    }
+                }
+            }
+#endif
+        }
+    } else {
+        // 对于GCC和Clang，直接从PATH中查找
+        compiler_paths = find_executables_in_path(config.name);
+    }
+    
+    // 处理找到的编译器路径
+    if (compiler_paths.empty()) {
+        std::cout << "No " << config.name << " compiler found in PATH.\n";
+        std::cout << "Enter " << config.name << " compiler path: ";
+        std::getline(std::cin, config.path);
+        config.path = clean_path(config.path);
+    } else if (compiler_paths.size() == 1) {
+        config.path = compiler_paths[0];
+        std::cout << "Using " << config.name << " compiler found at: " << config.path << "\n";
+    } else {
+        std::cout << "Multiple " << config.name << " compilers found:\n";
+        for (size_t i = 0; i < compiler_paths.size(); ++i) {
+            std::cout << "  " << i + 1 << ". " << compiler_paths[i] << "\n";
+        }
+        std::cout << "Select compiler (1-" << compiler_paths.size() << "): ";
+        std::string selection;
+        std::getline(std::cin, selection);
+        
+        try {
+            size_t idx = std::stoi(selection) - 1;
+            if (idx < compiler_paths.size()) {
+                config.path = compiler_paths[idx];
+            } else {
+                config.path = compiler_paths[0];
+            }
+        } catch (...) {
+            config.path = compiler_paths[0];
+        }
+        
+        std::cout << "Using " << config.name << " compiler at: " << config.path << "\n";
+    }
+    
+    // 选择C++标准
+    std::cout << "Select C++ standard:\n";
+    std::cout << "1. C++98\n";
+    std::cout << "2. C++11\n";
+    std::cout << "3. C++14\n";
+    std::cout << "4. C++17\n";
+    std::cout << "5. C++20\n";
+    std::cout << "6. C++23\n";
+    std::cout << "Enter choice (1-6, default 3): ";
+
+    std::string cpp_choice;
+    std::getline(std::cin, cpp_choice);
+    if (cpp_choice == "1") {
+        config.cppStandard = "c++98";
+    } else if (cpp_choice == "2") {
+        config.cppStandard = "c++11";
+    } else if (cpp_choice == "3") {
+        config.cppStandard = "c++14";
+    } else if (cpp_choice == "4") {
+        config.cppStandard = "c++17";
+    } else if (cpp_choice == "5") {
+        config.cppStandard = "c++20";
+    } else if (cpp_choice == "6") {
+        config.cppStandard = "c++23";
+    } else {
+        config.cppStandard = "c++17";
+    }
+    
+    // 选择C标准
+    std::cout << "Select C standard:\n";
+    std::cout << "1. C99\n";
+    std::cout << "2. C11\n";
+    std::cout << "3. C17\n";
+    std::cout << "4. C20\n";
+    std::cout << "5. C23\n";
+    std::cout << "Enter choice (1-5, default 3): ";
+
+    std::string c_choice;
+    std::getline(std::cin, c_choice);
+    
+    if (c_choice == "1") {
+        config.cStandard = "c99";
+    } else if (c_choice == "2") {
+        config.cStandard = "c11";
+    } else if (c_choice == "3") {
+        config.cStandard = "c17";
+    } else if (c_choice == "4") {
+        config.cStandard = "c20";
+    } else if (c_choice == "5") {
+        config.cStandard = "c23";
+    } else {
+        config.cStandard = "c17";
+    }
+    
+    // 添加额外编译选项
+    std::cout << "Enter any additional compiler flags (space separated, or press Enter for none): ";
+    std::string extra_flags;
+    std::getline(std::cin, extra_flags);
+    
+    if (!extra_flags.empty()) {
+        std::istringstream iss(extra_flags);
+        std::string flag;
+        while (iss >> flag) {
+            config.extraArgs.push_back(flag);
+        }
+    }
+    
+    return config;
+}
+
+// 获取用户选择的调试器配置
+DebuggerConfig get_debugger_config() {
+    DebuggerConfig config;
+    
+    std::cout << "\n=== Debugger Configuration ===\n";
+    
+    // 选择调试器类型
+    std::cout << "Select debugger type:\n";
+    std::cout << "1. GDB\n";
+    std::cout << "2. LLDB\n";
+    std::cout << "3. Visual Studio Debugger\n";
+    std::cout << "Enter choice (1-3, default 1): ";
+    
+    std::string choice;
+    std::getline(std::cin, choice);
+    
+    if (choice == "2") {
+        config.type = "lldb";
+        config.name = "lldb";
+    } else if (choice == "3") {
+        config.type = "cppvsdbg";
+        config.name = "Visual Studio Debugger";
+    } else {
+        config.type = "gdb";
+        config.name = "gdb";
+    }
+    
+    // 从PATH中查找调试器
+    std::vector<std::string> debugger_paths;
+    if (config.type == "cppvsdbg") {
+        // 对于VS调试器，可能需要特殊处理
+#ifdef _WIN32
+        // 尝试查找VS调试器
+        std::vector<std::string> common_paths = {
+            "C:/Program Files/Microsoft Visual Studio/2022/Community/Common7/IDE",
+            "C:/Program Files/Microsoft Visual Studio/2022/Professional/Common7/IDE",
+            "C:/Program Files/Microsoft Visual Studio/2022/Enterprise/Common7/IDE",
+            "C:/Program Files (x86)/Microsoft Visual Studio/2019/Community/Common7/IDE",
+            "C:/Program Files (x86)/Microsoft Visual Studio/2019/Professional/Common7/IDE",
+            "C:/Program Files (x86)/Microsoft Visual Studio/2019/Enterprise/Common7/IDE"
+        };
+        
+        for (const auto& path : common_paths) {
+            fs::path debugger_path = fs::path(path) / "Debugger";
+            if (fs::exists(debugger_path)) {
+                debugger_paths.push_back(clean_path(debugger_path.string()));
+            }
+        }
+#endif
+    } else {
+        // 对于GDB和LLDB，直接从PATH中查找
+        debugger_paths = find_executables_in_path(config.name);
+    }
+    
+    // 处理找到的调试器路径
+    if (debugger_paths.empty()) {
+        std::cout << "No " << config.name << " debugger found in PATH.\n";
+        std::cout << "Enter " << config.name << " debugger path: ";
+        std::getline(std::cin, config.path);
+        config.path = clean_path(config.path);
+    } else if (debugger_paths.size() == 1) {
+        config.path = debugger_paths[0];
+        std::cout << "Using " << config.name << " debugger found at: " << config.path << "\n";
+    } else {
+        std::cout << "Multiple " << config.name << " debuggers found:\n";
+        for (size_t i = 0; i < debugger_paths.size(); ++i) {
+            std::cout << "  " << i + 1 << ". " << debugger_paths[i] << "\n";
+        }
+        std::cout << "Select debugger (1-" << debugger_paths.size() << "): ";
+        std::string selection;
+        std::getline(std::cin, selection);
+
+        try {
+            size_t idx = std::stoi(selection) - 1;
+            if (idx < debugger_paths.size()) {
+                config.path = debugger_paths[idx];
+            } else {
+                config.path = debugger_paths[0];
+            }
+        } catch (...) {
+            config.path = debugger_paths[0];
+        }
+
+        std::cout << "Using " << config.name << " debugger at: " << config.path << "\n";
+    }
+    
+    return config;
+}
+
 // 生成基础的 c_cpp_properties.json
-void generate_c_cpp_properties(const fs::path& vscode_dir) {
+void generate_c_cpp_properties(const fs::path& vscode_dir, const CompilerConfig& compiler) {
     std::ofstream file(vscode_dir / "c_cpp_properties.json");
+    
+    std::string intelliSenseMode;
+    if (compiler.type == "msvc") {
+        intelliSenseMode = "windows-msvc-x64";
+    } else if (compiler.type == "clang") {
+        intelliSenseMode = "linux-clang-x64";
+    } else {
+        intelliSenseMode = "linux-gcc-x64";
+    }
+    
+    // 确保编译器路径使用正斜杠
+    std::string compilerPath = clean_path(compiler.path);
+    
     file << R"({
     "configurations": [
         {
@@ -128,10 +462,10 @@ void generate_c_cpp_properties(const fs::path& vscode_dir) {
                 "UNICODE",
                 "_UNICODE"
             ],
-            "compilerPath": "",
-            "cStandard": "c17",
-            "cppStandard": "c++17",
-            "intelliSenseMode": "windows-msvc-x64"
+            "compilerPath": ")" << compilerPath << R"(",
+            "cStandard": ")" << compiler.cStandard << R"(",
+            "cppStandard": ")" << compiler.cppStandard << R"(",
+            "intelliSenseMode": ")" << intelliSenseMode << R"("
         },
         {
             "name": "Linux",
@@ -140,10 +474,10 @@ void generate_c_cpp_properties(const fs::path& vscode_dir) {
                 "${workspaceFolder}/include"
             ],
             "defines": [],
-            "compilerPath": "Please fill in your compiler path",
-            "cStandard": "Please fill in the C standard you want.allowed values:Depends on your compiler, if you don't know which standards your compiler supports, open up your Google search[Choose one of the two options with std= in task.json]",
-            "cppStandard": "Please fill in the C++ standard you want.allowed values:Depends on your compiler, if you don't know which standards your compiler supports, open up your Google search[Choose one of the two options with std= in task.json]",
-            "intelliSenseMode": "Format:Your System-Your Compiler-Your CPU Architecture.For example:linux-gcc-x64"
+            "compilerPath": ")" << compilerPath << R"(",
+            "cStandard": ")" << compiler.cStandard << R"(",
+            "cppStandard": ")" << compiler.cppStandard << R"(",
+            "intelliSenseMode": ")" << intelliSenseMode << R"("
         }
     ],
     "version": 4
@@ -151,31 +485,55 @@ void generate_c_cpp_properties(const fs::path& vscode_dir) {
 }
 
 // 生成基础的 tasks.json
-void generate_tasks_json(const fs::path& vscode_dir, const std::string& project_name) {
+void generate_tasks_json(const fs::path& vscode_dir, const std::string& project_name, const CompilerConfig& compiler) {
     std::ofstream file(vscode_dir / "tasks.json");
+    
+    std::string output_ext = "";
+    if (compiler.type == "msvc") {
+        output_ext = ".exe";
+    }
+    
+    // 确保编译器路径使用正斜杠
+    std::string compilerPath = clean_path(compiler.path);
+    
     file << R"({
     "version": "2.0.0",
     "tasks": [
         {
             "label": "Build",
             "type": "shell",
-            "command": "your compiler",
+            "command": ")" << compilerPath << R"(",
             "args": [
-                "-std=c++17",
-                "-I${workspaceFolder}/include",
-                "-L${workspaceFolder}/lib/**",
+                "-std=)" << compiler.cppStandard << R"(",
+                "-I${workspaceFolder}/include",)";
+    
+    // 添加额外编译选项
+    for (const auto& arg : compiler.extraArgs) {
+        file << "\n                \"" << arg << "\",";
+    }
+    
+    file << R"(
                 "${workspaceFolder}/src/*.cpp",
                 "-o",
-                "${workspaceFolder}/build/bin/Debug/)" << project_name << R"("
+                "${workspaceFolder}/build/bin/Debug/)" << project_name << output_ext << R"("
             ],
             "group": {
                 "kind": "build",
                 "isDefault": true
             },
-            "problemMatcher": [
-                "$gcc"
+            "problemMatcher": [)";
+    
+    if (compiler.type == "msvc") {
+        file << R"(
+                "$msCompile")";
+    } else {
+        file << R"(
+                "$gcc")";
+    }
+    
+    file << R"(
             ],
-            "detail": "Built with GNU C++ Compiler"
+            "detail": "Built with )" << compiler.name << R"("
         },
         {
             "label": "Clean",
@@ -191,8 +549,18 @@ void generate_tasks_json(const fs::path& vscode_dir, const std::string& project_
 }
 
 // 生成基础的 launch.json
-void generate_launch_json(const fs::path& vscode_dir, const std::string& project_name) {
+void generate_launch_json(const fs::path& vscode_dir, const std::string& project_name, 
+                         const CompilerConfig& compiler, const DebuggerConfig& debugger) {
     std::ofstream file(vscode_dir / "launch.json");
+    
+    std::string output_ext = "";
+    if (compiler.type == "msvc") {
+        output_ext = ".exe";
+    }
+    
+    // 确保调试器路径使用正斜杠
+    std::string debuggerPath = clean_path(debugger.path);
+    
     file << R"({
     "version": "0.2.0",
     "configurations": [
@@ -200,14 +568,14 @@ void generate_launch_json(const fs::path& vscode_dir, const std::string& project
             "name": "Debug Launch",
             "type": "cppdbg",
             "request": "launch",
-            "program": "${workspaceFolder}/build/bin/Debug/)" << project_name << R"(",
+            "program": "${workspaceFolder}/build/bin/Debug/)" << project_name << output_ext << R"(",
             "args": [],
             "stopAtEntry": false,
             "cwd": "${workspaceFolder}",
             "environment": [],
             "externalConsole": true,
-            "MIMode": "your MI mode for example:gdb",
-            "miDebuggerPath": "your MI path",
+            "MIMode": ")" << debugger.type << R"(",
+            "miDebuggerPath": ")" << debuggerPath << R"(",
             "setupCommands": [
                 {
                     "description": "Enable pretty-printing for gdb",
@@ -235,6 +603,7 @@ void generate_settings_json(const fs::path& vscode_dir) {
     "explorer.confirmDragAndDrop": false
 })";
 }
+
 // ======================== SHA256计算功能 ========================
 class SHA256 {
 private:
@@ -386,6 +755,7 @@ public:
         return result.str();
     }
 };
+
 // ======================== 第三方库集成模块 ========================
 // 第三方库信息结构
 class ThirdPartyLibrary {
@@ -397,7 +767,6 @@ public:
     std::vector<std::string> dependencies;
     std::string configInstructions;
     std::string sha256;
-
 };
 
 // 支持的第三方库
@@ -597,6 +966,7 @@ void add_third_party_library(const fs::path& project_path, const std::string& li
     std::cout << lib.name << " added successfully!\n";
     std::cout << "See docs/" << lib.name << "_GUIDE.md for usage instructions\n";
 }
+
 void install_libraries(const fs::path& project_path, const std::vector<std::string>& libs) {
     for (const auto& lib : libs) {
         add_third_party_library(project_path, lib); // 复用单库安装逻辑
@@ -607,6 +977,7 @@ void install_libraries(const fs::path& project_path, const std::vector<std::stri
         }
     }
 }
+
 // 在生成项目文件后添加库安装选项
 void offer_library_installation(const fs::path& project_path) {
     std::cout << "\nWould you like to add any third-party libraries? [y/N]: ";
@@ -634,8 +1005,10 @@ void offer_library_installation(const fs::path& project_path) {
         add_third_party_library(project_path, lib_name);
     }
 }
+
 // 生成文件模板
-void generate_project_files(const fs::path& project_path, const std::string& project_name) {
+void generate_project_files(const fs::path& project_path, const std::string& project_name,
+                           const CompilerConfig& compiler, const DebuggerConfig& debugger) {
     const fs::path vscode_dir = project_path / ".vscode";
 
     // 确保.vscode目录存在
@@ -644,26 +1017,36 @@ void generate_project_files(const fs::path& project_path, const std::string& pro
     }
 
     // 生成.vscode配置文件
-    generate_c_cpp_properties(vscode_dir);
-    generate_tasks_json(vscode_dir, project_name);
-    generate_launch_json(vscode_dir, project_name);
+    generate_c_cpp_properties(vscode_dir, compiler);
+    generate_tasks_json(vscode_dir, project_name, compiler);
+    generate_launch_json(vscode_dir, project_name, compiler, debugger);
     generate_settings_json(vscode_dir);
 
     // 创建CMakeLists.txt（备用）
     {
         std::ofstream cmake(project_path / "CMakeLists.txt");
         cmake << "cmake_minimum_required(VERSION 3.20)\n"
-              << "project(MyProject VERSION 1.0 LANGUAGES CXX)\n\n"
-              << "set(CMAKE_CXX_STANDARD 17)\n\n"
-              <<"include(FetchContent)\n"
+              << "project(" << project_name << " VERSION 1.0 LANGUAGES CXX)\n\n"
+              << "set(CMAKE_CXX_STANDARD " << compiler.cppStandard.substr(2) << ")\n"
+              << "set(CMAKE_C_STANDARD " << compiler.cStandard.substr(1) << ")\n\n"
+              << "include(FetchContent)\n"
               << "include_directories(include)\n"
-              <<"add_library(${PROJECT_NAME}_core STATIC src/main.cpp)\n"
-              <<"target_include_directories(${PROJECT_NAME}_core PUBLIC include)\n"
-              <<"add_executable(${PROJECT_NAME} src/main.cpp)\n"
-              <<"target_link_libraries(${PROJECT_NAME} PRIVATE ${PROJECT_NAME}_core)\n"
-              <<"install(TARGETS ${PROJECT_NAME} DESTINATION bin)\n"
-              <<"install(DIRECTORY include/ DESTINATION include)\n";
+              << "add_library(${PROJECT_NAME}_core STATIC src/main.cpp)\n"
+              << "target_include_directories(${PROJECT_NAME}_core PUBLIC include)\n"
+              << "add_executable(${PROJECT_NAME} src/main.cpp)\n"
+              << "target_link_libraries(${PROJECT_NAME} PRIVATE ${PROJECT_NAME}_core)\n"
+              << "install(TARGETS ${PROJECT_NAME} DESTINATION bin)\n"
+              << "install(DIRECTORY include/ DESTINATION include)\n";
 
+        // 添加编译器特定选项
+        if (!compiler.extraArgs.empty()) {
+            cmake << "\n# Additional compiler flags\n";
+            cmake << "target_compile_options(${PROJECT_NAME} PRIVATE";
+            for (const auto& arg : compiler.extraArgs) {
+                cmake << " " << arg;
+            }
+            cmake << ")\n";
+        }
     }
 
     // 创建main.cpp
@@ -701,12 +1084,15 @@ void generate_project_files(const fs::path& project_path, const std::string& pro
     }
 }
 
-
 int main(int argc, char* argv[]) {
     std::string project_name = "project";
     std::string base_path = fs::current_path().string();
     const std::string VERSION = "1.0.1";
     std::vector<std::string> libraries_to_install;
+    
+    // 默认配置
+    CompilerConfig compilerConfig;
+    DebuggerConfig debuggerConfig;
 
     // 解析命令行参数
     for (int i = 1; i < argc; ++i) {
@@ -727,10 +1113,10 @@ int main(int argc, char* argv[]) {
                 return 1;
             }
         } else if (arg == "-v" || arg == "--version") {
-			std::cout << "FarewellSLN-Cpp-Starter\n"
-                      << "Version: " << VERSION << " Alpha1\n"
-			          << "Maintainer Macintosh-Maisensei\n"
-					  << "FarewellSLN-Cpp-Starter is libre and open-source software\n";
+            std::cout << "FarewellSLN-Cpp-Starter\n"
+                      << "Version: " << VERSION << " Beta1\n"
+                      << "Maintainer Macintosh-Maisensei\n"
+                      << "FarewellSLN-Cpp-Starter is libre and open-source software\n";
             return 0;
         } else if (arg == "-I" || arg == "--install") {
             if (i + 1 < argc) {
@@ -739,25 +1125,88 @@ int main(int argc, char* argv[]) {
                 std::cerr << "Error: Missing library name after " << arg << std::endl;
                 return 1;
             }
+        } else if (arg == "--compiler") {
+            if (i + 1 < argc) {
+                compilerConfig.name = argv[++i];
+            } else {
+                std::cerr << "Error: Missing compiler name after " << arg << std::endl;
+                return 1;
+            }
+        } else if (arg == "--compiler-path") {
+            if (i + 1 < argc) {
+                compilerConfig.path = argv[++i];
+            } else {
+                std::cerr << "Error: Missing compiler path after " << arg << std::endl;
+                return 1;
+            }
+        } else if (arg == "--cpp-standard") {
+            if (i + 1 < argc) {
+                compilerConfig.cppStandard = argv[++i];
+            } else {
+                std::cerr << "Error: Missing C++ standard after " << arg << std::endl;
+                return 1;
+            }
+        } else if (arg == "--c-standard") {
+            if (i + 1 < argc) {
+                compilerConfig.cStandard = argv[++i];
+            } else {
+                std::cerr << "Error: Missing C standard after " << arg << std::endl;
+                return 1;
+            }
+        } else if (arg == "--debugger") {
+            if (i + 1 < argc) {
+                debuggerConfig.name = argv[++i];
+            } else {
+                std::cerr << "Error: Missing debugger name after " << arg << std::endl;
+                return 1;
+            }
+        } else if (arg == "--debugger-path") {
+            if (i + 1 < argc) {
+                debuggerConfig.path = argv[++i];
+            } else {
+                std::cerr << "Error: Missing debugger path after " << arg << std::endl;
+                return 1;
+            }
+        } else if (arg == "--extra-args") {
+            if (i + 1 < argc) {
+                std::string extra_args = argv[++i];
+                std::istringstream iss(extra_args);
+                std::string flag;
+                while (iss >> flag) {
+                    compilerConfig.extraArgs.push_back(flag);
+                }
+            } else {
+                std::cerr << "Error: Missing extra arguments after " << arg << std::endl;
+                return 1;
+            }
         } else if (arg == "--help" || arg == "-h") {
             std::cout << "Usage: " << argv[0] << " [options]\n"
                       << "Options:\n"
-                      << "  -n, --name NAME  Set project name\n"
-                      << "  -p, --path PATH  Set project path\n"
-                      << "  -I, --install LIB  Install third-party library\n"
-                      << "  -v, --version     Output the version of the program\n"
-                      << "  -h, --help        Show this help message\n";
+                      << "  -n, --name NAME           Set project name\n"
+                      << "  -p, --path PATH           Set project path\n"
+                      << "  -I, --install LIB         Install third-party library\n"
+                      << "      --compiler COMPILER    Set compiler (gcc, clang, cl)\n"
+                      << "      --compiler-path PATH   Set compiler path\n"
+                      << "      --cpp-standard STD     Set C++ standard (c++11, c++14, c++17, c++20)\n"
+                      << "      --c-standard STD       Set C standard (c11, c17)\n"
+                      << "      --debugger DEBUGGER    Set debugger (gdb, lldb)\n"
+                      << "      --debugger-path PATH   Set debugger path\n"
+                      << "      --extra-args ARGS      Set additional compiler flags\n"
+                      << "  -v, --version             Output the version of the program\n"
+                      << "  -h, --help                Show this help message\n";
             return 0;
         } else {
             std::cerr << "Unknown option: " << arg << "\n";
             return 1;
         }
     }
+
     if (project_name != "project" && base_path == fs::current_path().string()) {
         std::cout << "Project will be created in current directory: " << base_path << "\n";
         std::cout << "Press Enter to continue, or Ctrl+C to cancel...";
         std::cin.get();
     }
+
     // 交互式输入（如果没有通过命令行指定）
     if (project_name == "project") {
         std::cout << "Enter project name (default: project): ";
@@ -777,11 +1226,25 @@ int main(int argc, char* argv[]) {
         }
     }
 
+    // 获取编译器配置（如果没有通过命令行指定）
+    if (compilerConfig.name.empty()) {
+        compilerConfig = get_compiler_config();
+    }
+    
+    // 获取调试器配置（如果没有通过命令行指定）
+    if (debuggerConfig.name.empty()) {
+        debuggerConfig = get_debugger_config();
+    }
+
     // 获取完整的项目路径
     const fs::path project_full_path = fs::path(base_path) / project_name;
 
     std::cout << "\nCreating project \"" << project_name << "\" at:\n"
               << "  " << project_full_path << "\n\n";
+    std::cout << "Compiler: " << compilerConfig.name << " (" << compilerConfig.path << ")\n";
+    std::cout << "C++ Standard: " << compilerConfig.cppStandard << "\n";
+    std::cout << "C Standard: " << compilerConfig.cStandard << "\n";
+    std::cout << "Debugger: " << debuggerConfig.name << " (" << debuggerConfig.path << ")\n\n";
 
     // 创建项目目录结构
     DirectoryNode project_structure = get_project_structure(project_name);
@@ -791,6 +1254,7 @@ int main(int argc, char* argv[]) {
         std::cerr << "\nFailed to create project directories!\n";
         return 1;
     }
+
     // 处理命令行指定的库安装
     if (!libraries_to_install.empty()) {
         for (const auto& lib_name : libraries_to_install) {
@@ -799,8 +1263,9 @@ int main(int argc, char* argv[]) {
     } else { // ✅ 仅当未通过命令行安装库时，才触发交互式安装
         offer_library_installation(project_full_path);
     }
+
     // 生成基础文件
-    generate_project_files(project_full_path, project_name);
+    generate_project_files(project_full_path, project_name, compilerConfig, debuggerConfig);
 
     std::cout << "\nProject \"" << project_name << "\" created successfully!\n";
     std::cout << "Configuration files generated in .vscode directory:\n";
@@ -811,7 +1276,7 @@ int main(int argc, char* argv[]) {
     std::cout << "Next steps:\n"
               << "  1. cd " << project_full_path << "\n"
               << "  2. code . (to open in VS Code)\n"
-              << "  3. Update the blank fields in tasks.json, launch.json, and c_cpp_properties.json\n"
+              << "  3. Review and update configuration files if needed\n"
               << "  4. Press F5 to build and debug!\n\n";
     std::cout << "Press Enter to exit...\n";
     std::cout.flush();
