@@ -11,7 +11,7 @@
                 "-o",
                 "${workspaceFolder}/build/bin/Debug/${fileBasenameNoExtension}.exe",
                 "-I",
-                ""${workspaceFolder}/include",
+                "${workspaceFolder}/include",
                 "-L${workspaceFolder}/lib",
                 "-Wall",
                 "-Wextra",
