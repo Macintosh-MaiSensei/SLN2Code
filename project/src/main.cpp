@@ -1,4 +1,4 @@
-/*Created by Macintosh-MaiSensei on 2025/8/22.*/
+/*Created by Macintosh-MaiSensei on 2025/9/2.*/
 /*Version 1.01 RC*/    
 #include <fstream>
 #include <iostream>
