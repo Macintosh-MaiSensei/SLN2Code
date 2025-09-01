@@ -23,8 +23,6 @@
 #include <optional>
 #include <cctype>
 #include <functional>
-namespace fs = std::filesystem;
-
 #ifdef _WIN32
     #define popen _popen
     #define pclose _pclose
@@ -32,7 +30,7 @@ namespace fs = std::filesystem;
 #else
     #include <cstdio>
 #endif
-
+namespace fs = std::filesystem;
 // 编译器类型枚举
 enum class CompilerType {
     GCC,
