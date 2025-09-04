@@ -99,7 +99,7 @@ public:
 
 // 全局常量
 namespace Constants {
-    const std::string VERSION = "1.0.1";
+    const std::string VERSION = "1.0.2";
     const std::string DEFAULT_PROJECT_NAME = "project";
     const std::string DEFAULT_LIBRARY_MIRROR = "https://raw.githubusercontent.com/Macintosh-MaiSensei/SLN2Code/main/libraries/";
 
