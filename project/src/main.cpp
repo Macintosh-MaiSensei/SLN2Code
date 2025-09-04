@@ -1,5 +1,5 @@
 /*Created by Macintosh-MaiSensei on 2025/9/2.*/
-/*Version 1.02 Alpha*/
+/*Version 1.0.2 Alpha*/
 #include <fstream>
 #include <iostream>
 #include <filesystem>
@@ -1756,7 +1756,7 @@ public:
     static void print_version() {
         Logo();
         std::cout << "SLN2Code\n"
-                  << "Version: " << Constants::VERSION << "\n"
+                  << "Version: " << Constants::VERSION <<" Alpha" << "\n"
                   << "Maintainer Macintosh-Maisensei\n"
                   << "SLN2Code is libre and open-source software\n";
     }
