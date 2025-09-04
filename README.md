@@ -10,9 +10,9 @@
 >Not all C++ projects need .sln shackles | 并非所有 C++ 项目都需要 .sln 的束缚         --FarewellSLN-Cpp-Starter  
 ## SLN2Code | A VSCode Project Generator
 ## SLN2Code | VSCode C++项目生成器
-FarewellSLN-Cpp-Starter is a modern C++ project scaffolding tool designed for developers using Visual Studio Code.   
+SLN2Code is a modern C++ project scaffolding tool designed for developers using Visual Studio Code.   
 It automates the creation of standardized C++ project structures with preconfigured VSCode settings and supports integration of popular third-party libraries.  
-FarewellSLN-Cpp-Starter 是一个现代 C++ 项目脚手架工具，专为使用 Visual Studio Code 的开发人员设计。  
+SLN2Code 是一个现代 C++ 项目脚手架工具，专为使用 Visual Studio Code 的开发人员设计。  
 它使用预配置的 VSCode 设置自动创建标准化 C++ 项目结构，并支持流行的第三方库的集成。
 ### Key Features  
 •🚀 ​​One-click C++ project scaffolding​​​ | 🚀 ​​一键式 C++ 项目脚手架​​  
