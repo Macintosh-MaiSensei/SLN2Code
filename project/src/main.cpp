@@ -1791,7 +1791,7 @@ int main(int argc, char* argv[]) {
         // 交互式输入（如果没有通过命令行指定）
         if (options.project_name == Constants::DEFAULT_PROJECT_NAME) {
             Logo();
-            std::cout << "v1.01 " << "https://github.com/Macintosh-MaiSensei/SLN2Code " << "Maintainer Macintosh-Maisensei\n";
+            std::cout << "v1.0.1 " << "https://github.com/Macintosh-MaiSensei/SLN2Code " << "Maintainer Macintosh-Maisensei\n";
             std::cout << "SLN2Code is libre and open-source software\n";
             std::cout << "Enter project name (default: " << Constants::DEFAULT_PROJECT_NAME << "): ";
             std::string input_name;
