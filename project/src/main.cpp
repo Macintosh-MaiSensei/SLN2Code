@@ -901,50 +901,55 @@ public:
         };
     }
 
-    // 递归创建目录结构（多线程版本）
-    static bool create_directory_recursive(const fs::path& base_path, const DirectoryNode& node, int depth = 0) {
+    static bool create_directory_recursive(const fs::path& base_path, const DirectoryNode& node,
+                                           int depth = 0, const std::string& prefix = "") {
         const fs::path current_path = Utils::join_paths(base_path, node.name);
-
-        // 缩进显示层级
         const std::string indent(depth * 2, ' ');
-        std::cout << indent << node.name;
+
+        // 使用树状结构前缀
+        std::string tree_prefix;
+        if (depth > 0) {
+            tree_prefix = prefix + (depth > 1 ? "│   " : "") + (depth > 0 ? "├── " : "");
+        }
+
+        // 显示当前目录
+        std::cout << tree_prefix << node.name;
 
         try {
             if (!fs::exists(current_path)) {
                 if (Utils::safe_create_directory(current_path)) {
-                    std::cout << "  ......done" << std::endl;
+                    std::cout << " ✓" << "\n";
                 } else {
-                    std::cout << "  ......FAILED" << std::endl;
+                    std::cout << " ✗" << "\n";
                     return false;
                 }
             } else {
-                std::cout << "  ......already exists" << std::endl;
+                std::cout << " ✓" << "\n";
             }
 
-            // 使用线程池并行创建子目录
-            std::vector<std::future<bool>> futures;
-            for (const auto& child : node.children) {
-                futures.push_back(std::async(std::launch::async,
-                                             [&current_path, &child, depth]() {
-                                                 return create_directory_recursive(current_path, child, depth + 1);
-                                             }));
-            }
+            // 处理子目录
+            std::string child_prefix = prefix + (depth > 0 ? "│   " : "");
+            for (size_t i = 0; i < node.children.size(); i++) {
+                const auto& child = node.children[i];
 
-            // 等待所有子目录创建完成
-            bool all_success = true;
-            for (auto& future : futures) {
-                if (!future.get()) {
-                    all_success = false;
+                // 判断是否是最后一个子节点
+                bool is_last = (i == node.children.size() - 1);
+                std::string new_prefix = is_last ? "    " : "│   ";
+
+                if (!create_directory_recursive(current_path, child, depth + 1,
+                                                child_prefix + new_prefix)) {
+                    return false;
                 }
             }
 
-            return all_success;
+            return true;
         } catch (const fs::filesystem_error& e) {
-            std::cerr << indent << "Error: " << e.what() << std::endl;
+            std::cout << " ✗ (" << e.what() << ")" << std::endl;
             return false;
         }
     }
 };
+
 // SHA256计算类
 class SHA256 {
 private:
