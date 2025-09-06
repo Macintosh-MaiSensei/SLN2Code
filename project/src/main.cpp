@@ -900,8 +900,64 @@ public:
                 }
         };
     }
+    #ifdef _WIN32
+    static bool use_ascii_output;
 
     static bool create_directory_recursive(const fs::path& base_path, const DirectoryNode& node,
+                                           int depth = 0, const std::string& prefix = "") {
+        const fs::path current_path = Utils::join_paths(base_path, node.name);
+        const std::string indent(depth * 2, ' ');
+
+        // 定义替代字符
+        const std::string vertical_line = use_ascii_output ? "|" : "\u2502";
+        const std::string branch_line = use_ascii_output ? "|-- " : "\u251c\u2500\u2500 ";
+        const std::string space_fill = use_ascii_output ? "    " : "    ";
+
+        // 使用树状结构前缀
+        std::string tree_prefix;
+        if (depth > 0) {
+            tree_prefix = prefix + (depth > 1 ? vertical_line + "   " : "") + (depth > 0 ? branch_line : "");
+        }
+
+        // 显示当前目录
+        std::cout << tree_prefix << node.name;
+
+        try {
+            if (!fs::exists(current_path)) {
+                if (Utils::safe_create_directory(current_path)) {
+                    std::cout << " ...done" << "\n";
+                } else {
+                    std::cout << " ...failed" << "\n";
+                    return false;
+                }
+            } else {
+                std::cout << " ...done" << "\n";
+            }
+
+            // 处理子目录
+            std::string child_prefix = prefix + (depth > 0 ? vertical_line + "   " : "");
+            for (size_t i = 0; i < node.children.size(); i++) {
+                const auto& child = node.children[i];
+
+                // 判断是否是最后一个子节点
+                bool is_last = (i == node.children.size() - 1);
+                std::string new_prefix = is_last ? space_fill : vertical_line + "   ";
+
+                if (!create_directory_recursive(current_path, child, depth + 1,
+                                                child_prefix + new_prefix)) {
+                    return false;
+                }
+            }
+
+            return true;
+        } catch (const fs::filesystem_error& e) {
+            std::cout << " ...failed (" << e.what() << ")" << std::endl;
+            return false;
+        }
+    }
+    #endif
+    #if defined(__linux__) || defined(__APPLE__)
+        static bool create_directory_recursive(const fs::path& base_path, const DirectoryNode& node,
                                            int depth = 0, const std::string& prefix = "") {
         const fs::path current_path = Utils::join_paths(base_path, node.name);
         const std::string indent(depth * 2, ' ');
@@ -948,10 +1004,176 @@ public:
             return false;
         }
     }
+    #endif  
 };
 
+// 初始化静态成员
+#ifdef _WIN32
+    bool ProjectStructureService::use_ascii_output = true;
+#endif
 // SHA256计算类
 class SHA256 {
+private:
+    static constexpr std::array<uint32_t, 64> K = {
+        0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
+        0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174,
+        0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc, 0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da,
+        0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7, 0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967,
+        0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13, 0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85,
+        0xa2bfe8a1, 0xa81a664b, 0xc24b8b70, 0xc76c51a3, 0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070,
+        0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3,
+        0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2
+    };
+
+    std::array<uint32_t, 8> state = {
+        0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a,
+        0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19
+    };
+
+    static uint32_t rotr(uint32_t x, uint32_t n) {
+        return (x >> n) | (x << (32 - n));
+    }
+
+    static uint32_t ch(uint32_t x, uint32_t y, uint32_t z) {
+        return (x & y) ^ (~x & z);
+    }
+
+    static uint32_t maj(uint32_t x, uint32_t y, uint32_t z) {
+        return (x & y) ^ (x & z) ^ (y & z);
+    }
+
+    static uint32_t sigma0(uint32_t x) {
+        return rotr(x, 2) ^ rotr(x, 13) ^ rotr(x, 22);
+    }
+
+    static uint32_t sigma1(uint32_t x) {
+        return rotr(x, 6) ^ rotr(x, 11) ^ rotr(x, 25);
+    }
+
+    static uint32_t gamma0(uint32_t x) {
+        return rotr(x, 7) ^ rotr(x, 18) ^ (x >> 3);
+    }
+
+    static uint32_t gamma1(uint32_t x) {
+        return rotr(x, 17) ^ rotr(x, 19) ^ (x >> 10);
+    }
+
+    void transform(const uint8_t* data) {
+        std::array<uint32_t, 64> W = {0};
+
+        // 将数据分成16个32位字（大端序）
+        for (int i = 0; i < 16; i++) {
+            W[i] = (static_cast<uint32_t>(data[i*4]) << 24) |
+                   (static_cast<uint32_t>(data[i*4+1]) << 16) |
+                   (static_cast<uint32_t>(data[i*4+2]) << 8) |
+                   (static_cast<uint32_t>(data[i*4+3]));
+        }
+
+        // 扩展消息
+        for (int i = 16; i < 64; i++) {
+            W[i] = gamma1(W[i-2]) + W[i-7] + gamma0(W[i-15]) + W[i-16];
+        }
+
+        auto a = state[0];
+        auto b = state[1];
+        auto c = state[2];
+        auto d = state[3];
+        auto e = state[4];
+        auto f = state[5];
+        auto g = state[6];
+        auto h = state[7];
+
+        // 主循环
+        for (int i = 0; i < 64; i++) {
+            uint32_t T1 = h + sigma1(e) + ch(e, f, g) + K[i] + W[i];
+            uint32_t T2 = sigma0(a) + maj(a, b, c);
+            h = g;
+            g = f;
+            f = e;
+            e = d + T1;
+            d = c;
+            c = b;
+            b = a;
+            a = T1 + T2;
+        }
+
+        state[0] += a;
+        state[1] += b;
+        state[2] += c;
+        state[3] += d;
+        state[4] += e;
+        state[5] += f;
+        state[6] += g;
+        state[7] += h;
+    }
+
+public:
+    static std::string hash_file(const fs::path& file_path) {
+        std::ifstream file(file_path, std::ios::binary);
+        if (!file) {
+            throw std::runtime_error("Can't open the file: " + file_path.string());
+        }
+
+        SHA256 sha;
+        std::array<uint8_t, 64> buffer = {0};
+        uint64_t total_bytes = 0;
+        bool processed_last_block = false;
+
+        while (!processed_last_block) {
+            file.read(reinterpret_cast<char*>(buffer.data()), 64);
+            size_t bytes_read = file.gcount();
+            total_bytes += bytes_read;
+
+            if (bytes_read < 64) {
+                // 处理最后一块数据
+                buffer[bytes_read] = 0x80; // 填充起始位
+
+                // 如果当前块空间不足，先处理这个块再创建新块
+                if (bytes_read >= 56) {
+                    // 填充剩余部分为0
+                    for (size_t i = bytes_read + 1; i < 64; i++) {
+                        buffer[i] = 0;
+                    }
+                    sha.transform(buffer.data());
+
+                    // 创建新块用于存放长度
+                    buffer.fill(0);
+                    // 在最后8字节写入位长度（大端序）
+                    uint64_t bit_length = total_bytes * 8;
+                    for (int i = 0; i < 8; i++) {
+                        buffer[63 - i] = static_cast<uint8_t>(bit_length >> (i * 8));
+                    }
+                    sha.transform(buffer.data());
+                } else {
+                    // 在当前块填充0和长度
+                    for (size_t i = bytes_read + 1; i < 56; i++) {
+                        buffer[i] = 0;
+                    }
+                    // 在最后8字节写入位长度（大端序）
+                    uint64_t bit_length = total_bytes * 8;
+                    for (int i = 0; i < 8; i++) {
+                        buffer[63 - i] = static_cast<uint8_t>(bit_length >> (i * 8));
+                    }
+                    sha.transform(buffer.data());
+                }
+                processed_last_block = true;
+            } else {
+                // 处理完整数据块
+                sha.transform(buffer.data());
+            }
+        }
+
+        // 转换为十六进制字符串
+        std::ostringstream result;
+        result << std::hex << std::setfill('0');
+        for (uint32_t val : sha.state) {
+            result << std::setw(8) << val;
+        }
+
+        return result.str();
+    }
+};
+/*class SHA256 {
 private:
     static constexpr std::array<uint32_t, 64> K = {
             0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
@@ -1100,7 +1322,7 @@ public:
 
         return result.str();
     }
-};
+};*/
 
 // 第三方库服务
 class LibraryService {
@@ -1811,6 +2033,7 @@ public:
         std::cout << "SLN2Code\n"
                   << "Version: " << Constants::VERSION <<" Alpha" << "\n"
                   << "Maintainer Macintosh-Maisensei\n"
+                  << "https://github.com/Macintosh-MaiSensei/SLN2Code\n"
                   << "SLN2Code is libre and open-source software\n";
     }
 };
@@ -1844,7 +2067,7 @@ int main(int argc, char* argv[]) {
         // 交互式输入（如果没有通过命令行指定）
         if (options.project_name == Constants::DEFAULT_PROJECT_NAME) {
             Logo();
-            std::cout << Constants::VERSION <<" Alpha" << "https://github.com/Macintosh-MaiSensei/SLN2Code " << "Maintainer Macintosh-Maisensei\n";
+            std::cout << Constants::VERSION <<" Alpha|" << "https://github.com/Macintosh-MaiSensei/SLN2Code|" << "Maintainer Macintosh-Maisensei\n";
             std::cout << "SLN2Code is libre and open-source software\n";
             std::cout << "Enter project name (default: " << Constants::DEFAULT_PROJECT_NAME << "): ";
             std::string input_name;
