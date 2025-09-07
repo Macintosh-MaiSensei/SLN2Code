@@ -16,7 +16,7 @@ namespace fs = std::filesystem;
 class Hash {
 public:
     enum Algorithm {
-        MD2, MD4, MD3, MD5, MD6,
+        MD2, MD4, MD5, // 移除非标准的 MD3 和 MD6
         SHA1,
         SHA224, SHA256, SHA384, SHA512,
         SHA3_224, SHA3_256, SHA3_384, SHA3_512,
@@ -26,10 +26,8 @@ public:
     static std::string hash_file(Algorithm algo, const fs::path& file_path, size_t shake_length = 0) {
         switch (algo) {
             case MD2: return MD2::hash_file(file_path);
-            case MD3: return MD3::hash_file(file_path);
             case MD4: return MD4::hash_file(file_path);
             case MD5: return MD5::hash_file(file_path);
-            case MD6: return MD6::hash_file(file_path);
             case SHA1: return SHA1::hash_file(file_path);
             case SHA224: return SHA2::hash_file(SHA2::SHA224, file_path);
             case SHA256: return SHA2::hash_file(SHA2::SHA256, file_path);
@@ -73,17 +71,17 @@ private:
         static std::string hash_file(const fs::path& file_path) {
             std::ifstream file(file_path, std::ios::binary);
             if (!file) throw std::runtime_error("Can't open file: " + file_path.string());
-            
+
             std::array<uint8_t, 48> state = {0};
             std::array<uint8_t, 16> checksum = {0};
             uint64_t total_bytes = 0;
-            
+
             while (file) {
                 std::array<uint8_t, 16> block = {0};
                 file.read(reinterpret_cast<char*>(block.data()), 16);
                 size_t bytes_read = file.gcount();
                 total_bytes += bytes_read;
-                
+
                 if (bytes_read < 16) {
                     size_t padding = 16 - bytes_read;
                     for (size_t i = bytes_read; i < 16; i++) {
@@ -94,12 +92,12 @@ private:
                 }
                 process_block(block.data(), state, checksum);
             }
-            
+
             process_block(checksum.data(), state, checksum);
-            
+
             std::ostringstream result;
             for (int i = 0; i < 16; i++) {
-                result << std::hex << std::setw(2) << std::setfill('0') 
+                result << std::hex << std::setw(2) << std::setfill('0')
                        << static_cast<int>(state[i]);
             }
             return result.str();
@@ -111,7 +109,7 @@ private:
                 state[16 + j] = block[j];
                 state[32 + j] = state[16 + j] ^ state[j];
             }
-            
+
             uint8_t t = 0;
             for (int round = 0; round < 18; round++) {
                 for (int j = 0; j < 48; j++) {
@@ -119,7 +117,7 @@ private:
                 }
                 t = (t + round) & 0xFF;
             }
-            
+
             uint8_t c = 0;
             for (int j = 0; j < 16; j++) {
                 c = checksum[j] ^ S[block[j] ^ c];
@@ -127,132 +125,15 @@ private:
             }
         }
     };
-    // ==================== MD3 ====================
-class MD3 {
-private:
-    static constexpr size_t BLOCK_SIZE = 64;
-    static constexpr size_t DIGEST_SIZE = 16;
-    
-    static constexpr std::array<uint32_t, 4> IV = {
-        0x67452301, 0xEFCDAB89, 0x98BADCFE, 0x10325476
-    };
-    
-    // 修正常量表（完整16个值）
-    static constexpr std::array<uint32_t, 16> T = {
-        0x00000000, 0x5A827999, 0x6ED9EBA1, 0x8F1BBCDC,
-        0xA953FD4E, 0x50A28BE6, 0x5C4DD124, 0x6D703EF3,
-        0x7A6D76E9, 0x00000000, 0x00000000, 0x00000000,
-        0x00000000, 0x00000000, 0x00000000, 0x00000000
-    };
-
-public:
-    static std::string hash_file(const fs::path& file_path) {
-        std::ifstream file(file_path, std::ios::binary);
-        if (!file) throw std::runtime_error("Can't open file: " + file_path.string());
-        
-        std::array<uint32_t, 4> state = IV;
-        std::array<uint8_t, BLOCK_SIZE> buffer = {0};
-        uint64_t total_bytes = 0;
-        bool full_block = false;
-        
-        while (file.read(reinterpret_cast<char*>(buffer.data()), BLOCK_SIZE)) {
-            full_block = (file.gcount() == BLOCK_SIZE);
-            total_bytes += file.gcount();
-            if (full_block) {
-                process_block(buffer.data(), state);
-            }
-        }
-        
-        // 处理剩余数据
-        size_t bytes_read = file.gcount();
-        total_bytes += bytes_read;
-        buffer.fill(0);
-        file.clear();
-        file.seekg(-static_cast<std::streamoff>(bytes_read), std::ios::cur);
-        file.read(reinterpret_cast<char*>(buffer.data()), bytes_read);
-        
-        // 添加填充: 0x80 后跟 0 字节
-        buffer[bytes_read] = 0x80;
-        size_t pad_len = BLOCK_SIZE - bytes_read - 1;
-        
-        // 如果当前块空间不足，处理填充块
-        if (pad_len < 8) {
-            process_block(buffer.data(), state);
-            buffer.fill(0);
-            pad_len = BLOCK_SIZE;
-        }
-        
-        // 在最后8字节添加位长度（大端序）
-        uint64_t bit_length = total_bytes * 8;
-        for (int i = 0; i < 8; ++i) {
-            buffer[BLOCK_SIZE - 8 + i] = static_cast<uint8_t>(bit_length >> (56 - i * 8));
-        }
-        process_block(buffer.data(), state);
-        
-        // 生成大端序摘要
-        std::ostringstream result;
-        for (uint32_t val : state) {
-            result << std::hex << std::setw(8) << std::setfill('0') << val;
-        }
-        return result.str();
-    }
-
-private:
-    static uint32_t rotl32(uint32_t x, uint32_t n) {
-        return (x << n) | (x >> (32 - n));
-    }
-    
-    static void process_block(const uint8_t* block, std::array<uint32_t, 4>& state) {
-        std::array<uint32_t, 16> X;
-        // 大端序解析
-        for (int i = 0; i < 16; ++i) {
-            X[i] = (block[i*4] << 24) | (block[i*4+1] << 16) | 
-                   (block[i*4+2] << 8) | block[i*4+3];
-        }
-        
-        uint32_t A = state[0], B = state[1], C = state[2], D = state[3];
-        
-        // MD3四轮主循环（每轮16步）
-        for (int round = 0; round < 4; ++round) {
-            for (int i = 0; i < 16; ++i) {
-                uint32_t F, G;
-                switch (round) {
-                    case 0: 
-                        F = (B & C) | (~B & D);
-                        G = i;
-                        break;
-                    case 1:
-                        F = (B | ~C) ^ D;
-                        G = (5*i + 1) % 16;
-                        break;
-                    case 2:
-                        F = (B & D) | (C & ~D);
-                        G = (3*i + 5) % 16;
-                        break;
-                    case 3:
-                        F = B ^ C ^ D;
-                        G = (7*i) % 16;
-                        break;
-                }
-                F += A + X[G] + T[i];
-                A = D;
-                D = C;
-                C = B;
-                B = rotl32(F, (i % 4) * 8 + 3);
-            }
-        }
-        
-        state[0] += A;
-        state[1] += B;
-        state[2] += C;
-        state[3] += D;
-    }
-};
 
     // ==================== MD4 ====================
     class MD4 {
     private:
         static constexpr std::array<uint32_t, 64> SHIFTS = {
+            3, 7, 11, 19, 3, 5, 9, 13, 3, 9, 11, 15,
+            3, 7, 11, 19, 3, 5, 9, 13, 3, 9, 11, 15,
+            3, 7, 11, 19, 3, 5, 9, 13, 3, 9, 11, 15,
+            3, 7, 11, 19, 3, 5, 9, 13, 3, 9, 11, 15,
             3, 7, 11, 19, 3, 5, 9, 13, 3, 9, 11, 15
         };
 
@@ -260,37 +141,37 @@ private:
         static std::string hash_file(const fs::path& file_path) {
             std::ifstream file(file_path, std::ios::binary);
             if (!file) throw std::runtime_error("Can't open file: " + file_path.string());
-            
+
             std::array<uint32_t, 4> state = {0x67452301, 0xEFCDAB89, 0x98BADCFE, 0x10325476};
             std::array<uint8_t, 64> buffer = {0};
             uint64_t total_bytes = 0;
-            
+
             while (file) {
                 file.read(reinterpret_cast<char*>(buffer.data()), 64);
                 size_t bytes_read = file.gcount();
                 total_bytes += bytes_read;
-                
+
                 if (bytes_read < 64) {
                     buffer[bytes_read] = 0x80;
                     for (size_t i = bytes_read + 1; i < 56; i++) {
                         buffer[i] = 0;
                     }
-                    
+
                     uint64_t bit_length = total_bytes * 8;
                     for (int i = 0; i < 8; i++) {
                         buffer[56 + i] = static_cast<uint8_t>(bit_length >> (i * 8));
                     }
-                    
+
                     process_block(buffer.data(), state);
                     break;
                 }
                 process_block(buffer.data(), state);
             }
-            
+
             std::ostringstream result;
             for (uint32_t val : state) {
                 for (int i = 0; i < 4; i++) {
-                    result << std::hex << std::setw(2) << std::setfill('0') 
+                    result << std::hex << std::setw(2) << std::setfill('0')
                            << static_cast<int>((val >> (i * 8)) & 0xFF);
                 }
             }
@@ -307,9 +188,10 @@ private:
             for (int i = 0; i < 16; i++) {
                 X[i] = (block[i*4+3] << 24) | (block[i*4+2] << 16) | (block[i*4+1] << 8) | block[i*4];
             }
-            
+
             uint32_t A = state[0], B = state[1], C = state[2], D = state[3];
-            
+
+            // Round 1
             for (int i = 0; i < 16; i++) {
                 uint32_t F = (B & C) | ((~B) & D);
                 uint32_t g = i;
@@ -317,20 +199,22 @@ private:
                 A = D;
                 D = C;
                 C = B;
-                B = rotl32(T, SHIFTS[i % 4]);
+                B = rotl32(T, SHIFTS[i]);
             }
-            
-            for (int i = 0; i < 16; i++) {
+
+            // Round 2
+            for (int i = 16; i < 32; i++) {
                 uint32_t F = (B & C) | (B & D) | (C & D);
                 uint32_t g = (i % 4) * 4 + (i / 4);
                 uint32_t T = A + F + X[g] + 0x5A827999;
                 A = D;
                 D = C;
                 C = B;
-                B = rotl32(T, SHIFTS[4 + (i % 4)]);
+                B = rotl32(T, SHIFTS[i]);
             }
-            
-            for (int i = 0; i < 16; i++) {
+
+            // Round 3
+            for (int i = 32; i < 48; i++) {
                 uint32_t F = B ^ C ^ D;
                 uint32_t g = (i % 4 == 0) ? 0 : (i % 4 == 1) ? 8 : (i % 4 == 2) ? 4 : 12;
                 g += i / 4;
@@ -338,9 +222,9 @@ private:
                 A = D;
                 D = C;
                 C = B;
-                B = rotl32(T, SHIFTS[8 + (i % 4)]);
+                B = rotl32(T, SHIFTS[i]);
             }
-            
+
             state[0] += A;
             state[1] += B;
             state[2] += C;
@@ -381,37 +265,37 @@ private:
         static std::string hash_file(const fs::path& file_path) {
             std::ifstream file(file_path, std::ios::binary);
             if (!file) throw std::runtime_error("Can't open file: " + file_path.string());
-            
+
             std::array<uint32_t, 4> state = {0x67452301, 0xEFCDAB89, 0x98BADCFE, 0x10325476};
             std::array<uint8_t, 64> buffer = {0};
             uint64_t total_bytes = 0;
-            
+
             while (file) {
                 file.read(reinterpret_cast<char*>(buffer.data()), 64);
                 size_t bytes_read = file.gcount();
                 total_bytes += bytes_read;
-                
+
                 if (bytes_read < 64) {
                     buffer[bytes_read] = 0x80;
                     for (size_t i = bytes_read + 1; i < 56; i++) {
                         buffer[i] = 0;
                     }
-                    
+
                     uint64_t bit_length = total_bytes * 8;
                     for (int i = 0; i < 8; i++) {
                         buffer[56 + i] = static_cast<uint8_t>(bit_length >> (i * 8));
                     }
-                    
+
                     process_block(buffer.data(), state);
                     break;
                 }
                 process_block(buffer.data(), state);
             }
-            
+
             std::ostringstream result;
             for (uint32_t val : state) {
                 for (int i = 0; i < 4; i++) {
-                    result << std::hex << std::setw(2) << std::setfill('0') 
+                    result << std::hex << std::setw(2) << std::setfill('0')
                            << static_cast<int>((val >> (i * 8)) & 0xFF);
                 }
             }
@@ -428,9 +312,9 @@ private:
             for (int i = 0; i < 16; i++) {
                 X[i] = (block[i*4+3] << 24) | (block[i*4+2] << 16) | (block[i*4+1] << 8) | block[i*4];
             }
-            
+
             uint32_t A = state[0], B = state[1], C = state[2], D = state[3];
-            
+
             for (int i = 0; i < 64; i++) {
                 uint32_t F, g;
                 if (i < 16) {
@@ -446,14 +330,14 @@ private:
                     F = C ^ (B | (~D));
                     g = (7*i) % 16;
                 }
-                
+
                 F = F + A + T[i] + X[g];
                 A = D;
                 D = C;
                 C = B;
                 B = B + rotl32(F, SHIFTS[i]);
             }
-            
+
             state[0] += A;
             state[1] += B;
             state[2] += C;
@@ -472,37 +356,37 @@ private:
         static std::string hash_file(const fs::path& file_path) {
             std::ifstream file(file_path, std::ios::binary);
             if (!file) throw std::runtime_error("Can't open file: " + file_path.string());
-            
+
             std::array<uint32_t, 5> state = {0x67452301, 0xEFCDAB89, 0x98BADCFE, 0x10325476, 0xC3D2E1F0};
             std::array<uint8_t, 64> buffer = {0};
             uint64_t total_bytes = 0;
-            
+
             while (file) {
                 file.read(reinterpret_cast<char*>(buffer.data()), 64);
                 size_t bytes_read = file.gcount();
                 total_bytes += bytes_read;
-                
+
                 if (bytes_read < 64) {
                     buffer[bytes_read] = 0x80;
                     for (size_t i = bytes_read + 1; i < 56; i++) {
                         buffer[i] = 0;
                     }
-                    
+
                     uint64_t bit_length = total_bytes * 8;
                     for (int i = 0; i < 8; i++) {
-                        buffer[63 - i] = static_cast<uint8_t>(bit_length >> (i * 8));
+                        buffer[63 - i] = static_cast<uint8_t>(bit_length >> (56 - i * 8));
                     }
-                    
+
                     process_block(buffer.data(), state);
                     break;
                 }
                 process_block(buffer.data(), state);
             }
-            
+
             std::ostringstream result;
             for (uint32_t val : state) {
                 for (int i = 3; i >= 0; i--) {
-                    result << std::hex << std::setw(2) << std::setfill('0') 
+                    result << std::hex << std::setw(2) << std::setfill('0')
                            << static_cast<int>((val >> (i * 8)) & 0xFF);
                 }
             }
@@ -519,13 +403,13 @@ private:
             for (int t = 0; t < 16; t++) {
                 W[t] = (block[t*4] << 24) | (block[t*4+1] << 16) | (block[t*4+2] << 8) | block[t*4+3];
             }
-            
+
             for (int t = 16; t < 80; t++) {
                 W[t] = rotl32(W[t-3] ^ W[t-8] ^ W[t-14] ^ W[t-16], 1);
             }
-            
+
             uint32_t A = state[0], B = state[1], C = state[2], D = state[3], E = state[4];
-            
+
             for (int t = 0; t < 80; t++) {
                 uint32_t F;
                 if (t < 20) {
@@ -537,7 +421,7 @@ private:
                 } else {
                     F = B ^ C ^ D;
                 }
-                
+
                 uint32_t temp = rotl32(A, 5) + F + E + K[t/20] + W[t];
                 E = D;
                 D = C;
@@ -545,89 +429,12 @@ private:
                 B = A;
                 A = temp;
             }
-            
+
             state[0] += A;
             state[1] += B;
             state[2] += C;
             state[3] += D;
             state[4] += E;
-        }
-    };
-
-    // ==================== MD6 ====================
-    class MD6 {
-    private:
-        static constexpr size_t r = 64;
-        static constexpr size_t c = 256;
-        static constexpr size_t d = 64;
-        static constexpr size_t L = 64;
-        static constexpr size_t ell = 8;
-        static constexpr uint64_t Q = 0xFFFFFFFFFFFFFFC4;
-        static constexpr uint64_t Qw = 0x0000000000000001;
-        
-        static constexpr std::array<uint64_t, 16> S = {
-            0x0123456789abcdef, 0xfedcba9876543210, 0x89abcdef01234567, 0x76543210fedcba98,
-            0x0123456789abcdef, 0xfedcba9876543210, 0x89abcdef01234567, 0x76543210fedcba98,
-            0x0123456789abcdef, 0xfedcba9876543210, 0x89abcdef01234567, 0x76543210fedcba98,
-            0x0123456789abcdef, 0xfedcba9876543210, 0x89abcdef01234567, 0x76543210fedcba98
-        };
-        
-    public:
-        static std::string hash_file(const fs::path& file_path) {
-            std::ifstream file(file_path, std::ios::binary);
-            if (!file) throw std::runtime_error("Can't open file: " + file_path.string());
-            
-            std::array<uint64_t, 16> state = {
-                0x7311c2812425cfa0, 0x6432286434aac8e7, 0xb60450e9ef68b7c1, 0xe8fb23908d9f06f1,
-                0xdd2e76cba691e5bf, 0x0cd0d63b2c30bc41, 0x1f8ccf6823058f8a, 0x54e5ed5b88e3775d,
-                0xadadabf8fc6d4e4d, 0x6d3f815e0a4f1e3a, 0x99c0aac87f0e3d96, 0x7c7d61c5c5c5d5ed,
-                0x7a7a7a7a7a7a7a7a, 0x7a7a7a7a7a7a7a7a, 0x7a7a7a7a7a7a7a7a, 0x7a7a7a7a7a7a7a7a
-            };
-            
-            std::array<uint64_t, 16> block = {0};
-            uint64_t total_bytes = 0;
-            bool last_block = false;
-            
-            while (!last_block) {
-                file.read(reinterpret_cast<char*>(block.data()), r);
-                size_t bytes_read = file.gcount();
-                total_bytes += bytes_read;
-                
-                if (bytes_read < r) {
-                    block[bytes_read] = 0x80;
-                    for (size_t i = bytes_read + 1; i < r; i++) {
-                        block[i] = 0;
-                    }
-                    last_block = true;
-                }
-                
-                compress(state, block);
-            }
-            
-            std::ostringstream result;
-            for (int i = 0; i < d/8; i++) {
-                result << std::hex << std::setw(16) << std::setfill('0') << state[i];
-            }
-            return result.str();
-        }
-
-    private:
-        static uint64_t rotl64(uint64_t x, uint32_t n) {
-            return (x << n) | (x >> (64 - n));
-        }
-        
-        static void compress(std::array<uint64_t, 16>& A, const std::array<uint64_t, 16>& B) {
-            for (int i = 0; i < 16; i++) {
-                A[i] ^= B[i];
-            }
-            
-            for (int round = 0; round < ell; round++) {
-                for (int i = 0; i < 16; i++) {
-                    A[i] = A[i] + A[(i+1)%16];
-                    A[i] = rotl64(A[i], S[i] & 0x3F);
-                    A[i] ^= A[(i+1)%16];
-                }
-            }
         }
     };
 
@@ -641,7 +448,7 @@ private:
         static std::string hash_file(Algorithm algo, const fs::path& file_path) {
             std::ifstream file(file_path, std::ios::binary);
             if (!file) throw std::runtime_error("Can't open file: " + file_path.string());
-            
+
             SHA2 hasher(algo);
             std::vector<uint8_t> buffer(hasher.block_size);
             uint64_t total_bytes = 0;
@@ -661,12 +468,12 @@ private:
                         for (size_t i = bytes_read + 1; i < hasher.block_size; i++) {
                             buffer[i] = 0;
                         }
-                        
+
                         if (hasher.is_32bit) hasher.transform32(buffer.data());
                         else hasher.transform64(buffer.data());
 
                         buffer.assign(hasher.block_size, 0);
-                        
+
                         if (hasher.is_32bit) {
                             uint64_t bit_length = total_bytes * 8;
                             for (int i = 0; i < 8; i++) {
@@ -680,14 +487,14 @@ private:
                                 buffer[hasher.block_size - 9 - i] = static_cast<uint8_t>(bit_length_high >> (i * 8));
                             }
                         }
-                        
+
                         if (hasher.is_32bit) hasher.transform32(buffer.data());
                         else hasher.transform64(buffer.data());
                     } else {
                         for (size_t i = bytes_read + 1; i < hasher.padding_start; i++) {
                             buffer[i] = 0;
                         }
-                        
+
                         if (hasher.is_32bit) {
                             uint64_t bit_length = total_bytes * 8;
                             for (int i = 0; i < 8; i++) {
@@ -701,7 +508,7 @@ private:
                                 buffer[hasher.block_size - 9 - i] = static_cast<uint8_t>(bit_length_high >> (i * 8));
                             }
                         }
-                        
+
                         if (hasher.is_32bit) hasher.transform32(buffer.data());
                         else hasher.transform64(buffer.data());
                     }
@@ -711,7 +518,7 @@ private:
                     else hasher.transform64(buffer.data());
                 }
             }
-            
+
             return hasher.get_digest();
         }
 
@@ -721,10 +528,10 @@ private:
         size_t block_size;
         size_t digest_size;
         size_t padding_start;
-        
+
         std::array<uint32_t, 8> state32;
         std::array<uint64_t, 8> state64;
-        
+
         static constexpr std::array<uint32_t, 64> K32 = {
             0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
             0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174,
@@ -735,7 +542,7 @@ private:
             0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3,
             0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2
         };
-        
+
         static constexpr std::array<uint64_t, 80> K64 = {
             0x428a2f98d728ae22, 0x7137449123ef65cd, 0xb5c0fbcfec4d3b2f, 0xe9b5dba58189dbbc,
             0x3956c25bf348b538, 0x59f111f1b605d019, 0x923f82a4af194f9b, 0xab1c5ed5da6d8118,
@@ -758,7 +565,7 @@ private:
             0x28db77f523047d84, 0x32caab7b40c72493, 0x3c9ebe0a15c9bebc, 0x431d67c49c100d4c,
             0x4cc5d4becb3e42b6, 0x597f299cfc657e2a, 0x5fcb6fab3ad6faec, 0x6c44198c4a475817
         };
-        
+
         SHA2(Algorithm algo) : algo_(algo) {
             switch (algo) {
                 case SHA224:
@@ -771,7 +578,7 @@ private:
                         0xffc00b31, 0x68581511, 0x64f98fa7, 0xbefa4fa4
                     };
                     break;
-                    
+
                 case SHA256:
                     is_32bit = true;
                     block_size = 64;
@@ -782,91 +589,91 @@ private:
                         0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19
                     };
                     break;
-                    
+
                 case SHA384:
                     is_32bit = false;
                     block_size = 128;
                     digest_size = 48;
                     padding_start = 112;
                     state64 = {
-                        0xcbbb9d5dc1059ed8, 0x629a292a367cd507, 
+                        0xcbbb9d5dc1059ed8, 0x629a292a367cd507,
                         0x9159015a3070dd17, 0x152fecd8f70e5939,
-                        0x67332667ffc00b31, 0x8eb44a8768581511, 
+                        0x67332667ffc00b31, 0x8eb44a8768581511,
                         0xdb0c2e0d64f98fa7, 0x47b5481dbefa4fa4
                     };
                     break;
-                    
+
                 case SHA512:
                     is_32bit = false;
                     block_size = 128;
                     digest_size = 64;
                     padding_start = 112;
                     state64 = {
-                        0x6a09e667f3bcc908, 0xbb67ae8584caa73b, 
+                        0x6a09e667f3bcc908, 0xbb67ae8584caa73b,
                         0x3c6ef372fe94f82b, 0xa54ff53a5f1d36f1,
-                        0x510e527fade682d1, 0x9b05688c2b3e6c1f, 
+                        0x510e527fade682d1, 0x9b05688c2b3e6c1f,
                         0x1f83d9abfb41bd6b, 0x5be0cd19137e2179
                     };
                     break;
             }
         }
-        
+
         static uint32_t rotr32(uint32_t x, uint32_t n) {
             return (x >> n) | (x << (32 - n));
         }
-        
+
         static uint32_t ch32(uint32_t x, uint32_t y, uint32_t z) {
             return (x & y) ^ (~x & z);
         }
-        
+
         static uint32_t maj32(uint32_t x, uint32_t y, uint32_t z) {
             return (x & y) ^ (x & z) ^ (y & z);
         }
-        
+
         static uint32_t sigma0_32(uint32_t x) {
             return rotr32(x, 2) ^ rotr32(x, 13) ^ rotr32(x, 22);
         }
-        
+
         static uint32_t sigma1_32(uint32_t x) {
             return rotr32(x, 6) ^ rotr32(x, 11) ^ rotr32(x, 25);
         }
-        
+
         static uint32_t gamma0_32(uint32_t x) {
             return rotr32(x, 7) ^ rotr32(x, 18) ^ (x >> 3);
         }
-        
+
         static uint32_t gamma1_32(uint32_t x) {
             return rotr32(x, 17) ^ rotr32(x, 19) ^ (x >> 10);
         }
-        
+
         static uint64_t rotr64(uint64_t x, uint32_t n) {
             return (x >> n) | (x << (64 - n));
         }
-        
+
         static uint64_t ch64(uint64_t x, uint64_t y, uint64_t z) {
             return (x & y) ^ (~x & z);
         }
-        
+
         static uint64_t maj64(uint64_t x, uint64_t y, uint64_t z) {
             return (x & y) ^ (x & z) ^ (y & z);
         }
-        
+
         static uint64_t sigma0_64(uint64_t x) {
             return rotr64(x, 28) ^ rotr64(x, 34) ^ rotr64(x, 39);
         }
-        
+
         static uint64_t sigma1_64(uint64_t x) {
             return rotr64(x, 14) ^ rotr64(x, 18) ^ rotr64(x, 41);
         }
-        
+
         static uint64_t gamma0_64(uint64_t x) {
             return rotr64(x, 7) ^ rotr64(x, 18) ^ (x >> 3);
         }
-        
+
         static uint64_t gamma1_64(uint64_t x) {
             return rotr64(x, 17) ^ rotr64(x, 19) ^ (x >> 10);
         }
-        
+
         void transform32(const uint8_t* data) {
             std::array<uint32_t, 64> W = {0};
 
@@ -912,7 +719,7 @@ private:
             state32[6] += g;
             state32[7] += h;
         }
-        
+
         void transform64(const uint8_t* data) {
             std::array<uint64_t, 80> W = {0};
 
@@ -962,30 +769,30 @@ private:
             state64[6] += g;
             state64[7] += h;
         }
-        
+
         std::string get_digest() {
             std::ostringstream result;
             result << std::hex << std::setfill('0');
-            
+
             switch (algo_) {
                 case SHA224:
                     for (size_t i = 0; i < 7; i++) {
                         result << std::setw(8) << state32[i];
                     }
                     break;
-                    
+
                 case SHA256:
                     for (uint32_t val : state32) {
                         result << std::setw(8) << val;
                     }
                     break;
-                    
+
                 case SHA384:
                     for (size_t i = 0; i < 6; i++) {
                         result << std::setw(16) << state64[i];
                     }
                     break;
-                    
+
                 case SHA512:
                     for (uint64_t val : state64) {
                         result << std::setw(16) << val;
@@ -1075,8 +882,8 @@ private:
             return to_hex(hasher.shake(output_len));
         }
 
-        SHA3(size_t digest_bits, size_t capacity_bits) 
-            : digest_size(digest_bits / 8), 
+        SHA3(size_t digest_bits, size_t capacity_bits)
+            : digest_size(digest_bits / 8),
               rate(1600 - capacity_bits),
               rate_bytes(rate / 8),
               capacity(capacity_bits) {
@@ -1153,12 +960,12 @@ private:
             for (int x = 0; x < 5; x++) {
                 C[x] = state[x] ^ state[x + 5] ^ state[x + 10] ^ state[x + 15] ^ state[x + 20];
             }
-            
+
             std::array<uint64_t, 5> D;
             for (int x = 0; x < 5; x++) {
                 D[x] = C[(x + 4) % 5] ^ rotl64(C[(x + 1) % 5], 1);
             }
-            
+
             for (int x = 0; x < 5; x++) {
                 for (int y = 0; y < 5; y++) {
                     state[x + 5 * y] ^= D[x];
@@ -1213,18 +1020,17 @@ private:
         void pad_and_absorb() {
             size_t block_size = rate_bytes;
             size_t n = buffer.size();
-            
-            if (n == block_size - 1) {
-                buffer.push_back(0x86);
-                absorb_block(buffer.data());
-            } else {
-                buffer.push_back(0x01);
-                while (buffer.size() < block_size - 1) {
-                    buffer.push_back(0x00);
-                }
-                buffer.push_back(0x80);
-                absorb_block(buffer.data());
+
+            // 标准填充：添加 0x06 对于 SHA3，0x1F 对于 SHAKE
+            uint8_t suffix = (digest_size > 0) ? 0x06 : 0x1F;
+
+            buffer.push_back(suffix);
+            while (buffer.size() % block_size != block_size - 1) {
+                buffer.push_back(0x00);
             }
+            buffer.back() |= 0x80;
+
+            absorb_block(buffer.data());
             buffer.clear();
         }
 
