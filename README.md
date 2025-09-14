@@ -28,7 +28,7 @@ Compile the Tool 编译工具
 g++ -g main.cpp -o main.exe -std=c++17
 ```
 or 或者  
-Download the release pack 下载发布包  
+Use cmake build
 Run 运行  
 ```
 main.exe -n your project name -p your project dir
