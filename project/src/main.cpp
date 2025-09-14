@@ -1,5 +1,5 @@
 /*Created by Macintosh-MaiSensei on 2025/9/13.*/
-/*Version 1.0.2 Alpha*/
+/*Version 1.0.2 RC*/
 #include <fstream>
 #include <iostream>
 #include <filesystem>
@@ -1880,7 +1880,7 @@ public:
     static void print_version() {
         Logo();
         std::cout << "SLN2Code\n"
-                  << "Version: " << Constants::VERSION <<" Alpha" << "\n"
+                  << "Version: " << Constants::VERSION << "\n"
                   << "Maintainer Macintosh-Maisensei\n"
                   << "https://github.com/Macintosh-MaiSensei/SLN2Code\n"
                   << "SLN2Code is libre and open-source software\n";
@@ -1916,7 +1916,7 @@ int main(int argc, char* argv[]) {
         // 交互式输入（如果没有通过命令行指定）
         if (options.project_name == Constants::DEFAULT_PROJECT_NAME) {
             Logo();
-            std::cout << Constants::VERSION <<" Alpha|" << "https://github.com/Macintosh-MaiSensei/SLN2Code|" << "Maintainer Macintosh-Maisensei\n";
+            std::cout << Constants::VERSION <<"|" << "https://github.com/Macintosh-MaiSensei/SLN2Code|" << "Maintainer Macintosh-Maisensei\n";
             std::cout << "SLN2Code is libre and open-source software\n";
             std::cout << "Enter project name (default: " << Constants::DEFAULT_PROJECT_NAME << "): ";
             std::string input_name;
