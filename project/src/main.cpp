@@ -1,5 +1,5 @@
-/*Created by Macintosh-MaiSensei on 2025/9/13.*/
-/*Version 1.0.2 RC*/
+/*Created by Macintosh-MaiSensei on 2025/9/16.*/
+/*Version 1.0.3 Alpha*/
 #include <fstream>
 #include <iostream>
 #include <filesystem>
@@ -7,6 +7,7 @@
 #include <string>
 #include <algorithm>
 #include <unordered_map>
+#include <map>
 #include <array>
 #include <cstdint>
 #include <sstream>
@@ -100,7 +101,7 @@ public:
 
 // 全局常量
 namespace Constants {
-    const std::string VERSION = "1.0.2";
+    const std::string VERSION = "1.0.3";
     const std::string DEFAULT_PROJECT_NAME = "project";
     const std::string DEFAULT_LIBRARY_MIRROR = "https://github.com/Macintosh-MaiSensei/SLN2Code";
 
@@ -165,7 +166,472 @@ target_link_libraries(${PROJECT_NAME} SDL2 SDL2main)
                      }}
     };
 }
+class JsonValue;
+using JsonObject = std::map<std::string, JsonValue>;
+using JsonArray = std::vector<JsonValue>;
+using JsonValueBase = std::variant<
+        std::nullptr_t,    // null
+        bool,              // boolean
+        int,               // integer
+        double,            // double
+        std::string,       // string
+        JsonObject,        // object
+        JsonArray          // array
+>;
 
+class JsonValue {
+public:
+    // 构造函数
+    JsonValue() : data(nullptr) {}
+    JsonValue(std::nullptr_t) : data(nullptr) {}
+    JsonValue(bool value) : data(value) {}
+    JsonValue(int value) : data(value) {}
+    JsonValue(double value) : data(value) {}
+    JsonValue(const char* value) : data(std::string(value)) {}
+    JsonValue(const std::string& value) : data(value) {}
+    JsonValue(const JsonObject& value) : data(value) {}
+    JsonValue(const JsonArray& value) : data(value) {}
+
+    // 类型检查
+    bool is_null() const { return std::holds_alternative<std::nullptr_t>(data); }
+    bool is_boolean() const { return std::holds_alternative<bool>(data); }
+    bool is_integer() const { return std::holds_alternative<int>(data); }
+    bool is_double() const { return std::holds_alternative<double>(data); }
+    bool is_number() const { return is_integer() || is_double(); }
+    bool is_string() const { return std::holds_alternative<std::string>(data); }
+    bool is_object() const { return std::holds_alternative<JsonObject>(data); }
+    bool is_array() const { return std::holds_alternative<JsonArray>(data); }
+
+    // 值获取
+    bool as_boolean() const {
+        if (is_boolean()) return std::get<bool>(data);
+        throw std::runtime_error("Not a boolean");
+    }
+
+    int as_integer() const {
+        if (is_integer()) return std::get<int>(data);
+        if (is_double()) return static_cast<int>(std::get<double>(data));
+        throw std::runtime_error("Not a number");
+    }
+
+    double as_double() const {
+        if (is_double()) return std::get<double>(data);
+        if (is_integer()) return static_cast<double>(std::get<int>(data));
+        throw std::runtime_error("Not a number");
+    }
+
+    const std::string& as_string() const {
+        if (is_string()) return std::get<std::string>(data);
+        throw std::runtime_error("Not a string");
+    }
+
+    const JsonObject& as_object() const {
+        if (is_object()) return std::get<JsonObject>(data);
+        throw std::runtime_error("Not an object");
+    }
+
+    JsonArray& as_array() {
+        if (is_array()) return std::get<JsonArray>(data);
+        throw std::runtime_error("Not an array");
+    }
+
+    const JsonArray& as_array() const {
+        if (is_array()) return std::get<JsonArray>(data);
+        throw std::runtime_error("Not an array");
+    }
+
+    // 对象访问
+    bool has_key(const std::string& key) const {
+        if (!is_object()) return false;
+        const auto& obj = as_object();
+        return obj.find(key) != obj.end();
+    }
+
+    const JsonValue& operator[](const std::string& key) const {
+        if (!is_object()) throw std::runtime_error("Not an object");
+        const auto& obj = as_object();
+        auto it = obj.find(key);
+        if (it == obj.end()) throw std::runtime_error("Key not found");
+        return it->second;
+    }
+
+    JsonValue& operator[](const std::string& key) {
+        if (!is_object()) throw std::runtime_error("Not an object");
+        auto& obj = std::get<JsonObject>(data);
+        return obj[key];
+    }
+
+    // 数组访问
+    const JsonValue& operator[](size_t index) const {
+        if (!is_array()) throw std::runtime_error("Not an array");
+        const auto& arr = as_array();
+        if (index >= arr.size()) throw std::runtime_error("Index out of range");
+        return arr[index];
+    }
+
+    JsonValue& operator[](size_t index) {
+        if (!is_array()) throw std::runtime_error("Not an array");
+        auto& arr = as_array();
+        if (index >= arr.size()) throw std::runtime_error("Index out of range");
+        return arr[index];
+    }
+
+    // 转换为字符串表示
+    std::string to_string() const {
+        if (is_null()) return "null";
+        if (is_boolean()) return as_boolean() ? "true" : "false";
+        if (is_integer()) return std::to_string(as_integer());
+        if (is_double()) {
+            std::ostringstream oss;
+            oss << as_double();
+            return oss.str();
+        }
+        if (is_string()) return "\"" + escape_string(as_string()) + "\"";
+        if (is_object()) {
+            std::string result = "{";
+            bool first = true;
+            for (const auto& [key, value] : as_object()) {
+                if (!first) result += ", ";
+                first = false;
+                result += "\"" + escape_string(key) + "\": " + value.to_string();
+            }
+            return result + "}";
+        }
+        if (is_array()) {
+            std::string result = "[";
+            bool first = true;
+            for (const auto& value : as_array()) {
+                if (!first) result += ", ";
+                first = false;
+                result += value.to_string();
+            }
+            return result + "]";
+        }
+        return "unknown";
+    }
+
+private:
+    static std::string escape_string(const std::string& str) {
+        std::string result;
+        for (char c : str) {
+            switch (c) {
+                case '"': result += "\\\""; break;
+                case '\\': result += "\\\\"; break;
+                case '\b': result += "\\b"; break;
+                case '\f': result += "\\f"; break;
+                case '\n': result += "\\n"; break;
+                case '\r': result += "\\r"; break;
+                case '\t': result += "\\t"; break;
+                default:
+                    if (static_cast<unsigned char>(c) < 0x20) {
+                        // 控制字符使用Unicode转义
+                        char buf[7];
+                        snprintf(buf, sizeof(buf), "\\u%04x", static_cast<unsigned char>(c));
+                        result += buf;
+                    } else {
+                        result += c;
+                    }
+            }
+        }
+        return result;
+    }
+
+    JsonValueBase data;
+};
+
+// JSON解析器类
+class JsonParser {
+public:
+    JsonParser(const std::string& json) : input(json), pos(0) {}
+
+    JsonValue parse() {
+        skip_whitespace();
+        return parse_value();
+    }
+
+private:
+    char current() const {
+        if (pos >= input.size()) return '\0';
+        return input[pos];
+    }
+
+    char next() {
+        if (pos >= input.size()) return '\0';
+        return input[++pos];
+    }
+
+    void skip_whitespace() {
+        while (pos < input.size() && std::isspace(static_cast<unsigned char>(input[pos]))) {
+            pos++;
+        }
+    }
+
+    void expect(char c) {
+        if (current() != c) {
+            throw parse_error("Expected '" + std::string(1, c) + "'");
+        }
+        next();
+    }
+
+    JsonValue parse_value() {
+        skip_whitespace();
+        char c = current();
+        switch (c) {
+            case 'n': return parse_null();
+            case 't': return parse_true();
+            case 'f': return parse_false();
+            case '"': return parse_string();
+            case '[': return parse_array();
+            case '{': return parse_object();
+            case '-': case '0': case '1': case '2': case '3': case '4':
+            case '5': case '6': case '7': case '8': case '9':
+                return parse_number();
+            default:
+                throw parse_error("Unexpected character: " + std::string(1, c));
+        }
+    }
+
+    JsonValue parse_null() {
+        expect('n');
+        expect('u');
+        expect('l');
+        expect('l');
+        return JsonValue(nullptr);
+    }
+
+    JsonValue parse_true() {
+        expect('t');
+        expect('r');
+        expect('u');
+        expect('e');
+        return JsonValue(true);
+    }
+
+    JsonValue parse_false() {
+        expect('f');
+        expect('a');
+        expect('l');
+        expect('s');
+        expect('e');
+        return JsonValue(false);
+    }
+
+    JsonValue parse_string() {
+        expect('"');
+        std::string result;
+        bool escape = false;
+
+        while (pos < input.size()) {
+            char c = current();
+
+            if (escape) {
+                escape = false;
+                switch (c) {
+                    case '"': result += '"'; break;
+                    case '\\': result += '\\'; break;
+                    case '/': result += '/'; break;
+                    case 'b': result += '\b'; break;
+                    case 'f': result += '\f'; break;
+                    case 'n': result += '\n'; break;
+                    case 'r': result += '\r'; break;
+                    case 't': result += '\t'; break;
+                    case 'u': {
+                        // Unicode转义序列
+                        if (pos + 4 >= input.size()) {
+                            throw parse_error("Incomplete unicode escape");
+                        }
+                        std::string hex = input.substr(pos + 1, 4);
+                        pos += 4;
+                        try {
+                            unsigned int code = std::stoul(hex, nullptr, 16);
+                            // 简化处理：只支持基本多语言平面
+                            if (code <= 0x7F) {
+                                result += static_cast<char>(code);
+                            } else if (code <= 0x7FF) {
+                                result += static_cast<char>(0xC0 | (code >> 6));
+                                result += static_cast<char>(0x80 | (code & 0x3F));
+                            } else {
+                                result += static_cast<char>(0xE0 | (code >> 12));
+                                result += static_cast<char>(0x80 | ((code >> 6) & 0x3F));
+                                result += static_cast<char>(0x80 | (code & 0x3F));
+                            }
+                        } catch (...) {
+                            throw parse_error("Invalid unicode escape: \\u" + hex);
+                        }
+                        break;
+                    }
+                    default:
+                        throw parse_error("Invalid escape sequence: \\" + std::string(1, c));
+                }
+            } else if (c == '\\') {
+                escape = true;
+            } else if (c == '"') {
+                next();
+                return JsonValue(result);
+            } else {
+                result += c;
+            }
+
+            next();
+        }
+
+        throw parse_error("Unterminated string");
+    }
+
+    JsonValue parse_number() {
+        size_t start = pos;
+        bool is_double = false;
+
+        if (current() == '-') {
+            next();
+        }
+
+        if (current() == '0') {
+            next();
+        } else if (std::isdigit(current())) {
+            while (std::isdigit(current())) {
+                next();
+            }
+        } else {
+            throw parse_error("Invalid number");
+        }
+
+        if (current() == '.') {
+            is_double = true;
+            next();
+            if (!std::isdigit(current())) {
+                throw parse_error("Invalid number after decimal point");
+            }
+            while (std::isdigit(current())) {
+                next();
+            }
+        }
+
+        if (current() == 'e' || current() == 'E') {
+            is_double = true;
+            next();
+            if (current() == '+' || current() == '-') {
+                next();
+            }
+            if (!std::isdigit(current())) {
+                throw parse_error("Invalid exponent");
+            }
+            while (std::isdigit(current())) {
+                next();
+            }
+        }
+
+        std::string num_str = input.substr(start, pos - start);
+
+        try {
+            if (is_double) {
+                return JsonValue(std::stod(num_str));
+            } else {
+                return JsonValue(std::stoi(num_str));
+            }
+        } catch (...) {
+            throw parse_error("Invalid number format: " + num_str);
+        }
+    }
+
+    JsonValue parse_array() {
+        expect('[');
+        skip_whitespace();
+
+        JsonArray result;
+
+        if (current() == ']') {
+            next();
+            return JsonValue(result);
+        }
+
+        while (true) {
+            result.push_back(parse_value());
+            skip_whitespace();
+
+            if (current() == ']') {
+                next();
+                break;
+            }
+
+            expect(',');
+            skip_whitespace();
+        }
+
+        return JsonValue(result);
+    }
+
+    JsonValue parse_object() {
+        expect('{');
+        skip_whitespace();
+
+        JsonObject result;
+
+        if (current() == '}') {
+            next();
+            return JsonValue(result);
+        }
+
+        while (true) {
+            skip_whitespace();
+            std::string key = parse_string().as_string();
+            skip_whitespace();
+            expect(':');
+            JsonValue value = parse_value();
+            result[key] = value;
+            skip_whitespace();
+
+            if (current() == '}') {
+                next();
+                break;
+            }
+
+            expect(',');
+            skip_whitespace();
+        }
+
+        return JsonValue(result);
+    }
+
+    std::runtime_error parse_error(const std::string& msg) const {
+        size_t line = 1;
+        size_t column = 1;
+        size_t context_start = pos;
+
+        // 查找当前行开始位置
+        while (context_start > 0 && input[context_start - 1] != '\n') {
+            context_start--;
+        }
+
+        // 查找当前行结束位置
+        size_t context_end = pos;
+        while (context_end < input.size() && input[context_end] != '\n') {
+            context_end++;
+        }
+
+        // 计算行号
+        for (size_t i = 0; i < pos; i++) {
+            if (input[i] == '\n') {
+                line++;
+                column = 1;
+            } else {
+                column++;
+            }
+        }
+
+        std::string context = input.substr(context_start, context_end - context_start);
+        std::string indicator = std::string(pos - context_start, ' ') + "^";
+
+        return std::runtime_error(
+                "JSON parse error at line " + std::to_string(line) +
+                ", column " + std::to_string(column) + ": " + msg +
+                "\n" + context + "\n" + indicator
+        );
+    }
+
+    const std::string& input;
+    size_t pos;
+};
 // 实用工具类
 class Utils {
 public:
@@ -306,9 +772,37 @@ public:
         }).base();
         return (start < end) ? std::string(start, end) : std::string();
     }
-
-    // 简单JSON解析（仅用于库信息）
     static std::unordered_map<std::string, std::string> parse_simple_json(const std::string& json) {
+        try {
+            JsonParser parser(json);
+            JsonValue value = parser.parse();
+
+            if (!value.is_object()) {
+                throw std::runtime_error("Expected JSON object");
+            }
+
+            std::unordered_map<std::string, std::string> result;
+            for (const auto& [key, val] : value.as_object()) {
+                if (val.is_string()) {
+                    result[key] = val.as_string();
+                } else {
+                    result[key] = val.to_string();
+                }
+            }
+            return result;
+        } catch (const std::exception& e) {
+            std::cerr << "JSON parse error: " << e.what() << std::endl;
+            return {};
+        }
+    }
+
+    // 新增方法：解析完整JSON
+    static JsonValue parse_json(const std::string& json) {
+        JsonParser parser(json);
+        return parser.parse();
+    }
+    // 简单JSON解析（仅用于库信息）
+    /*static std::unordered_map<std::string, std::string> parse_simple_json(const std::string& json) {
         std::unordered_map<std::string, std::string> result;
         std::istringstream stream(json);
         std::string line;
@@ -331,7 +825,7 @@ public:
         }
 
         return result;
-    }
+    }*/
 };
 
 // 库信息提供者接口
@@ -1880,7 +2374,7 @@ public:
     static void print_version() {
         Logo();
         std::cout << "SLN2Code\n"
-                  << "Version: " << Constants::VERSION << "\n"
+                  << "Version: " << Constants::VERSION <<" Alpha"<< "\n"
                   << "Maintainer Macintosh-Maisensei\n"
                   << "https://github.com/Macintosh-MaiSensei/SLN2Code\n"
                   << "SLN2Code is libre and open-source software\n";
@@ -1916,7 +2410,7 @@ int main(int argc, char* argv[]) {
         // 交互式输入（如果没有通过命令行指定）
         if (options.project_name == Constants::DEFAULT_PROJECT_NAME) {
             Logo();
-            std::cout <<"Version: " << Constants::VERSION <<"|" << "https://github.com/Macintosh-MaiSensei/SLN2Code|" << "Maintainer Macintosh-Maisensei\n";
+            std::cout <<"Version: " << Constants::VERSION <<" Alpha"<<"|" << "https://github.com/Macintosh-MaiSensei/SLN2Code|" << "Maintainer Macintosh-Maisensei\n";
             std::cout << "SLN2Code is libre and open-source software\n";
             std::cout << "Enter project name (default: " << Constants::DEFAULT_PROJECT_NAME << "): ";
             std::string input_name;
