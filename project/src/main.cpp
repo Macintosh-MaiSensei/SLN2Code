@@ -25,6 +25,7 @@
 #include <cctype>
 #include <functional>
 #include <future>
+#include <variant>
 #ifdef _WIN32
 #define popen _popen
     #define pclose _pclose
@@ -2375,7 +2376,7 @@ public:
         Logo();
         std::cout << "SLN2Code\n"
                   << "Version: " << Constants::VERSION <<" Alpha"<< "\n"
-                  << "Maintainer Macintosh-Maisensei\n"
+                  << "Maintainer: Macintosh-Maisensei\n"
                   << "Contributors: None\n"
                   << "https://github.com/Macintosh-MaiSensei/SLN2Code\n"
                   << "SLN2Code is libre and open-source software\n";
@@ -2413,7 +2414,7 @@ int main(int argc, char* argv[]) {
             Logo();
             std::cout << Constants::VERSION <<" Modular"<< " Alpha|"
                       << "https://github.com/Macintosh-MaiSensei/SLN2Code|"
-                      << "Maintainer Macintosh-Maisensei\n"
+                      << "Maintainer: Macintosh-Maisensei\n"
                       << "Contributors: None\n"
                       << "SLN2Code is libre and open-source software\n";
             std::string input_name;
