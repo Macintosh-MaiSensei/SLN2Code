@@ -1504,7 +1504,7 @@ public:
 
 // 初始化静态成员
 #ifdef _WIN32
-bool ProjectStructureService::use_ascii_output = true;
+    bool ProjectStructureService::use_ascii_output = true;
 #endif
 // SHA256计算类
 class SHA256 {
