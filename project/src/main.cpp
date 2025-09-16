@@ -27,11 +27,11 @@
 #include <future>
 #include <variant>
 #ifdef _WIN32
-#define popen _popen
+    #define popen _popen
     #define pclose _pclose
     #include <io.h>
 #else
-#include <cstdio>
+    #include <cstdio>
 #endif
 namespace fs = std::filesystem;
 // 编译器类型枚举
@@ -2379,7 +2379,7 @@ public:
                   << "Maintainer: Macintosh-Maisensei\n"
                   << "Contributors: None\n"
                   << "https://github.com/Macintosh-MaiSensei/SLN2Code\n"
-                  << "SLN2Code is libre and open-source software\n";
+                  << "SLN2Code is libre and open-source software, distributed under the MIT License.\n";
     }
 };
 
@@ -2412,11 +2412,11 @@ int main(int argc, char* argv[]) {
         // 交互式输入（如果没有通过命令行指定）
         if (options.project_name == Constants::DEFAULT_PROJECT_NAME) {
             Logo();
-            std::cout << Constants::VERSION <<" Modular"<< " Alpha|"
+            std::cout << Constants::VERSION << " Alpha|"
                       << "https://github.com/Macintosh-MaiSensei/SLN2Code|"
                       << "Maintainer: Macintosh-Maisensei\n"
                       << "Contributors: None\n"
-                      << "SLN2Code is libre and open-source software\n";
+                      << "SLN2Code is libre and open-source software, distributed under the MIT License.\n";
             std::cout << "Enter project name (default: " << Constants::DEFAULT_PROJECT_NAME << "): ";
             std::string input_name;
             std::getline(std::cin, input_name);
