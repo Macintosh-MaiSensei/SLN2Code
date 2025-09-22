@@ -1,4 +1,4 @@
-/*Created by Macintosh-MaiSensei on 2025/9/23.*/
+/*Created by Macintosh-MaiSensei on 2025/9/16.*/
 /*Version 1.0.3 Beta*/
 #include <fstream>
 #include <iostream>
@@ -594,14 +594,57 @@ private:
     }
 
     // 验证URL格式
+// 在 SafeCommandExecutor 类中修改 is_valid_url 函数
     static bool is_valid_url(const std::string& url) {
-        static const std::regex url_regex(
-                R"(^(https?|ftp):\/\/)"  // 协议
-                R"(([a-zA-Z0-9_-]+\.)+[a-zA-Z]{2,})"  // 域名
-                R"(\/[a-zA-Z0-9_\/\-\.]*)"  // 路径
-                R"(\?[a-zA-Z0-9_=&%-]*)?$)",  // 查询参数
-                std::regex::icase);
-        return std::regex_match(url, url_regex);
+        // 更简单但更健壮的URL验证
+        try {
+            // 基本检查：URL必须以http://或https://开头
+            if (url.find("http://") != 0 && url.find("https://") != 0) {
+                return false;
+            }
+
+            // 检查是否包含空格或控制字符
+            for (char c : url) {
+                if (std::isspace(c) || c < 0x20) {
+                    return false;
+                }
+            }
+
+            // 检查是否包含可疑字符
+            if (url.find("..") != std::string::npos ||
+                url.find(";") != std::string::npos ||
+                url.find("|") != std::string::npos ||
+                url.find("`") != std::string::npos ||
+                url.find("$") != std::string::npos ||
+                url.find("(") != std::string::npos ||
+                url.find(")") != std::string::npos) {
+                return false;
+            }
+
+            // 对于已知的安全URL模式，直接放行
+            if (url.find("https://github.com/") == 0 ||
+                url.find("https://archives.boost.io/") == 0 ||
+                url.find("https://www.libsdl.org/") == 0) {
+                return true;
+            }
+
+            // 其他URL需要更严格的检查
+            static const std::regex domain_regex(
+                    R"([a-zA-Z0-9][a-zA-Z0-9-]{1,61}[a-zA-Z0-9]\.[a-zA-Z]{2,})");
+
+            // 提取域名部分
+            size_t start = url.find("://") + 3;
+            size_t end = url.find('/', start);
+            if (end == std::string::npos) end = url.length();
+
+            std::string domain = url.substr(start, end - start);
+
+            // 验证域名格式
+            return std::regex_match(domain, domain_regex);
+        } catch (const std::exception& e) {
+            std::cerr << "URL validation error: " << e.what() << "\n";
+            return false;
+        }
     }
 
     // 验证参数安全性
