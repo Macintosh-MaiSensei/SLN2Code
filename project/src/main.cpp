@@ -1,5 +1,5 @@
 /*Created by Macintosh-MaiSensei on 2025/9/16.*/
-/*Version 1.0.3 Alpha*/
+/*Version 1.0.3 Beta*/
 #include <fstream>
 #include <iostream>
 #include <filesystem>
@@ -26,14 +26,22 @@
 #include <functional>
 #include <future>
 #include <variant>
+#include <sys/wait.h>
+#include <unistd.h>
+#include <cstring>
+#include <cerrno>
 #ifdef _WIN32
     #define popen _popen
     #define pclose _pclose
     #include <io.h>
+    #include <process.h>
 #else
     #include <cstdio>
+    #include <sys/types.h>
 #endif
+
 namespace fs = std::filesystem;
+
 // 编译器类型枚举
 enum class CompilerType {
     GCC,
@@ -167,472 +175,457 @@ target_link_libraries(${PROJECT_NAME} SDL2 SDL2main)
                      }}
     };
 }
-class JsonValue;
-using JsonObject = std::map<std::string, JsonValue>;
-using JsonArray = std::vector<JsonValue>;
-using JsonValueBase = std::variant<
-        std::nullptr_t,    // null
-        bool,              // boolean
-        int,               // integer
-        double,            // double
-        std::string,       // string
-        JsonObject,        // object
-        JsonArray          // array
->;
 
-class JsonValue {
+// SHA256计算类
+class SHA256 {
+private:
+    static constexpr std::array<uint32_t, 64> K = {
+            0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
+            0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174,
+            0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc, 0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da,
+            0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7, 0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967,
+            0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13, 0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85,
+            0xa2bfe8a1, 0xa81a664b, 0xc24b8b70, 0xc76c51a3, 0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070,
+            0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3,
+            0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2
+    };
+
+    std::array<uint32_t, 8> state = {
+            0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a,
+            0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19
+    };
+
+    static uint32_t rotr(uint32_t x, uint32_t n) {
+        return (x >> n) | (x << (32 - n));
+    }
+
+    static uint32_t ch(uint32_t x, uint32_t y, uint32_t z) {
+        return (x & y) ^ (~x & z);
+    }
+
+    static uint32_t maj(uint32_t x, uint32_t y, uint32_t z) {
+        return (x & y) ^ (x & z) ^ (y & z);
+    }
+
+    static uint32_t sigma0(uint32_t x) {
+        return rotr(x, 2) ^ rotr(x, 13) ^ rotr(x, 22);
+    }
+
+    static uint32_t sigma1(uint32_t x) {
+        return rotr(x, 6) ^ rotr(x, 11) ^ rotr(x, 25);
+    }
+
+    static uint32_t gamma0(uint32_t x) {
+        return rotr(x, 7) ^ rotr(x, 18) ^ (x >> 3);
+    }
+
+    static uint32_t gamma1(uint32_t x) {
+        return rotr(x, 17) ^ rotr(x, 19) ^ (x >> 10);
+    }
+
+    void transform(const uint8_t* data) {
+        std::array<uint32_t, 64> W = {0};
+
+        // 将数据分成16个32位字（大端序）
+        for (int i = 0; i < 16; i++) {
+            W[i] = (static_cast<uint32_t>(data[i*4]) << 24) |
+                   (static_cast<uint32_t>(data[i*4+1]) << 16) |
+                   (static_cast<uint32_t>(data[i*4+2]) << 8) |
+                   (static_cast<uint32_t>(data[i*4+3]));
+        }
+
+        // 扩展消息
+        for (int i = 16; i < 64; i++) {
+            W[i] = gamma1(W[i-2]) + W[i-7] + gamma0(W[i-15]) + W[i-16];
+        }
+
+        auto a = state[0];
+        auto b = state[1];
+        auto c = state[2];
+        auto d = state[3];
+        auto e = state[4];
+        auto f = state[5];
+        auto g = state[6];
+        auto h = state[7];
+
+        // 主循环
+        for (int i = 0; i < 64; i++) {
+            uint32_t T1 = h + sigma1(e) + ch(e, f, g) + K[i] + W[i];
+            uint32_t T2 = sigma0(a) + maj(a, b, c);
+            h = g;
+            g = f;
+            f = e;
+            e = d + T1;
+            d = c;
+            c = b;
+            b = a;
+            a = T1 + T2;
+        }
+
+        state[0] += a;
+        state[1] += b;
+        state[2] += c;
+        state[3] += d;
+        state[4] += e;
+        state[5] += f;
+        state[6] += g;
+        state[7] += h;
+    }
+
 public:
-    // 构造函数
-    JsonValue() : data(nullptr) {}
-    JsonValue(std::nullptr_t) : data(nullptr) {}
-    JsonValue(bool value) : data(value) {}
-    JsonValue(int value) : data(value) {}
-    JsonValue(double value) : data(value) {}
-    JsonValue(const char* value) : data(std::string(value)) {}
-    JsonValue(const std::string& value) : data(value) {}
-    JsonValue(const JsonObject& value) : data(value) {}
-    JsonValue(const JsonArray& value) : data(value) {}
-
-    // 类型检查
-    bool is_null() const { return std::holds_alternative<std::nullptr_t>(data); }
-    bool is_boolean() const { return std::holds_alternative<bool>(data); }
-    bool is_integer() const { return std::holds_alternative<int>(data); }
-    bool is_double() const { return std::holds_alternative<double>(data); }
-    bool is_number() const { return is_integer() || is_double(); }
-    bool is_string() const { return std::holds_alternative<std::string>(data); }
-    bool is_object() const { return std::holds_alternative<JsonObject>(data); }
-    bool is_array() const { return std::holds_alternative<JsonArray>(data); }
-
-    // 值获取
-    bool as_boolean() const {
-        if (is_boolean()) return std::get<bool>(data);
-        throw std::runtime_error("Not a boolean");
-    }
-
-    int as_integer() const {
-        if (is_integer()) return std::get<int>(data);
-        if (is_double()) return static_cast<int>(std::get<double>(data));
-        throw std::runtime_error("Not a number");
-    }
-
-    double as_double() const {
-        if (is_double()) return std::get<double>(data);
-        if (is_integer()) return static_cast<double>(std::get<int>(data));
-        throw std::runtime_error("Not a number");
-    }
-
-    const std::string& as_string() const {
-        if (is_string()) return std::get<std::string>(data);
-        throw std::runtime_error("Not a string");
-    }
-
-    const JsonObject& as_object() const {
-        if (is_object()) return std::get<JsonObject>(data);
-        throw std::runtime_error("Not an object");
-    }
-
-    JsonArray& as_array() {
-        if (is_array()) return std::get<JsonArray>(data);
-        throw std::runtime_error("Not an array");
-    }
-
-    const JsonArray& as_array() const {
-        if (is_array()) return std::get<JsonArray>(data);
-        throw std::runtime_error("Not an array");
-    }
-
-    // 对象访问
-    bool has_key(const std::string& key) const {
-        if (!is_object()) return false;
-        const auto& obj = as_object();
-        return obj.find(key) != obj.end();
-    }
-
-    const JsonValue& operator[](const std::string& key) const {
-        if (!is_object()) throw std::runtime_error("Not an object");
-        const auto& obj = as_object();
-        auto it = obj.find(key);
-        if (it == obj.end()) throw std::runtime_error("Key not found");
-        return it->second;
-    }
-
-    JsonValue& operator[](const std::string& key) {
-        if (!is_object()) throw std::runtime_error("Not an object");
-        auto& obj = std::get<JsonObject>(data);
-        return obj[key];
-    }
-
-    // 数组访问
-    const JsonValue& operator[](size_t index) const {
-        if (!is_array()) throw std::runtime_error("Not an array");
-        const auto& arr = as_array();
-        if (index >= arr.size()) throw std::runtime_error("Index out of range");
-        return arr[index];
-    }
-
-    JsonValue& operator[](size_t index) {
-        if (!is_array()) throw std::runtime_error("Not an array");
-        auto& arr = as_array();
-        if (index >= arr.size()) throw std::runtime_error("Index out of range");
-        return arr[index];
-    }
-
-    // 转换为字符串表示
-    std::string to_string() const {
-        if (is_null()) return "null";
-        if (is_boolean()) return as_boolean() ? "true" : "false";
-        if (is_integer()) return std::to_string(as_integer());
-        if (is_double()) {
-            std::ostringstream oss;
-            oss << as_double();
-            return oss.str();
+    static std::string hash_file(const fs::path& file_path) {
+        std::ifstream file(file_path, std::ios::binary);
+        if (!file) {
+            throw std::runtime_error("Can't open the file: " + file_path.string());
         }
-        if (is_string()) return "\"" + escape_string(as_string()) + "\"";
-        if (is_object()) {
-            std::string result = "{";
-            bool first = true;
-            for (const auto& [key, value] : as_object()) {
-                if (!first) result += ", ";
-                first = false;
-                result += "\"" + escape_string(key) + "\": " + value.to_string();
+
+        SHA256 sha;
+        std::array<uint8_t, 64> buffer = {0};
+        uint64_t total_bytes = 0;
+        bool processed_last_block = false;
+
+        while (!processed_last_block) {
+            file.read(reinterpret_cast<char*>(buffer.data()), 64);
+            size_t bytes_read = file.gcount();
+            total_bytes += bytes_read;
+
+            if (bytes_read < 64) {
+                // 处理最后一块数据
+                buffer[bytes_read] = 0x80; // 填充起始位
+
+                // 如果当前块空间不足，先处理这个块再创建新块
+                if (bytes_read >= 56) {
+                    // 填充剩余部分为0
+                    for (size_t i = bytes_read + 1; i < 64; i++) {
+                        buffer[i] = 0;
+                    }
+                    sha.transform(buffer.data());
+
+                    // 创建新块用于存放长度
+                    buffer.fill(0);
+                    // 在最后8字节写入位长度（大端序）
+                    uint64_t bit_length = total_bytes * 8;
+                    for (int i = 0; i < 8; i++) {
+                        buffer[63 - i] = static_cast<uint8_t>(bit_length >> (i * 8));
+                    }
+                    sha.transform(buffer.data());
+                } else {
+                    // 在当前块填充0和长度
+                    for (size_t i = bytes_read + 1; i < 56; i++) {
+                        buffer[i] = 0;
+                    }
+                    // 在最后8字节写入位长度（大端序）
+                    uint64_t bit_length = total_bytes * 8;
+                    for (int i = 0; i < 8; i++) {
+                        buffer[63 - i] = static_cast<uint8_t>(bit_length >> (i * 8));
+                    }
+                    sha.transform(buffer.data());
+                }
+                processed_last_block = true;
+            } else {
+                // 处理完整数据块
+                sha.transform(buffer.data());
             }
-            return result + "}";
         }
-        if (is_array()) {
-            std::string result = "[";
-            bool first = true;
-            for (const auto& value : as_array()) {
-                if (!first) result += ", ";
-                first = false;
-                result += value.to_string();
+
+        // 转换为十六进制字符串
+        std::ostringstream result;
+        result << std::hex << std::setfill('0');
+        for (uint32_t val : sha.state) {
+            result << std::setw(8) << val;
+        }
+
+        return result.str();
+    }
+};
+
+// 安全命令执行类
+class SafeCommandExecutor {
+public:
+    // 安全执行命令并获取输出
+    static std::string execute(const std::vector<std::string>& args) {
+        if (args.empty()) {
+            throw std::invalid_argument("Command arguments cannot be empty");
+        }
+
+        // 验证每个参数
+        for (const auto& arg : args) {
+            if (!is_safe_argument(arg)) {
+                throw std::runtime_error("Unsafe argument detected: " + arg);
             }
-            return result + "]";
         }
-        return "unknown";
+
+        // 记录执行的命令（用于调试）
+        std::string command_str;
+        for (const auto& arg : args) {
+            command_str += arg + " ";
+        }
+        std::cout << "Executing safe command: " << command_str << std::endl;
+
+#ifdef _WIN32
+        return execute_windows(args);
+#else
+        return execute_posix(args);
+#endif
+    }
+
+    // 安全下载文件
+    static bool download_file(const std::string& url, const fs::path& output_path) {
+        // 验证URL
+        if (!is_valid_url(url)) {
+            throw std::invalid_argument("Invalid URL format: " + url);
+        }
+
+        // 验证输出路径
+        if (output_path.empty() || output_path.is_relative()) {
+            throw std::invalid_argument("Output path must be absolute");
+        }
+
+        // 安全路径检查
+        if (output_path.string().find("..") != std::string::npos) {
+            throw std::invalid_argument("Output path contains parent directory traversal");
+        }
+
+        // 创建输出目录
+        if (!safe_create_directory(output_path.parent_path())) {
+            throw std::runtime_error("Failed to create output directory");
+        }
+
+#ifdef _WIN32
+        std::vector<std::string> args = {
+            "curl",
+            "-L",  // 跟随重定向
+            "-o", output_path.string(),
+            url
+        };
+#else
+        std::vector<std::string> args = {
+                "curl",
+                "-L",  // 跟随重定向
+                "-o", output_path.string(),
+                url
+        };
+#endif
+
+        try {
+            std::string result = execute(args);
+            // 检查curl是否成功
+            if (result.find("curl:") != std::string::npos) {
+                std::cerr << "Curl error: " << result << std::endl;
+                return false;
+            }
+            return true;
+        } catch (const std::exception& e) {
+            std::cerr << "Download failed: " << e.what() << std::endl;
+            return false;
+        }
+    }
+
+    // 安全解压文件
+    static bool unzip_file(const fs::path& zip_file, const fs::path& output_dir) {
+        // 验证输入文件
+        if (!fs::exists(zip_file) || !fs::is_regular_file(zip_file)) {
+            throw std::invalid_argument("Invalid zip file: " + zip_file.string());
+        }
+
+        // 验证输出目录
+        if (!fs::exists(output_dir) || !fs::is_directory(output_dir)) {
+            throw std::invalid_argument("Invalid output directory: " + output_dir.string());
+        }
+
+        // 安全路径检查
+        if (zip_file.string().find("..") != std::string::npos ||
+            output_dir.string().find("..") != std::string::npos) {
+            throw std::invalid_argument("Path contains parent directory traversal");
+        }
+
+#ifdef _WIN32
+        std::vector<std::string> args = {
+            "powershell",
+            "-Command",
+            "Expand-Archive",
+            "-Path", zip_file.string(),
+            "-DestinationPath", output_dir.string()
+        };
+#else
+        std::vector<std::string> args = {
+                "unzip",
+                "-o",
+                zip_file.string(),
+                "-d",
+                output_dir.string()
+        };
+#endif
+
+        try {
+            std::string result = execute(args);
+            return true;
+        } catch (const std::exception& e) {
+            std::cerr << "Unzip failed: " << e.what() << std::endl;
+            return false;
+        }
+    }
+
+    // 安全创建目录
+    static bool safe_create_directory(const fs::path& path) {
+        try {
+            if (!fs::exists(path)) {
+                return fs::create_directories(path);
+            }
+            return true;
+        } catch (const fs::filesystem_error& e) {
+            std::cerr << "Error creating directory: " << e.what() << std::endl;
+            return false;
+        }
     }
 
 private:
-    static std::string escape_string(const std::string& str) {
-        std::string result;
-        for (char c : str) {
-            switch (c) {
-                case '"': result += "\\\""; break;
-                case '\\': result += "\\\\"; break;
-                case '\b': result += "\\b"; break;
-                case '\f': result += "\\f"; break;
-                case '\n': result += "\\n"; break;
-                case '\r': result += "\\r"; break;
-                case '\t': result += "\\t"; break;
-                default:
-                    if (static_cast<unsigned char>(c) < 0x20) {
-                        // 控制字符使用Unicode转义
-                        char buf[7];
-                        snprintf(buf, sizeof(buf), "\\u%04x", static_cast<unsigned char>(c));
-                        result += buf;
-                    } else {
-                        result += c;
-                    }
-            }
+    // Windows命令执行
+    static std::string execute_windows(const std::vector<std::string>& args) {
+        std::string command;
+        for (const auto& arg : args) {
+            if (!command.empty()) command += " ";
+            command += "\"" + escape_windows_arg(arg) + "\"";
         }
+
+        std::array<char, 128> buffer;
+        std::string result;
+        std::unique_ptr<FILE, decltype(&pclose)> pipe(popen(command.c_str(), "r"), pclose);
+
+        if (!pipe) {
+            throw std::runtime_error("popen() failed!");
+        }
+
+        while (fgets(buffer.data(), buffer.size(), pipe.get()) != nullptr) {
+            result += buffer.data();
+        }
+
         return result;
     }
 
-    JsonValueBase data;
-};
-
-// JSON解析器类
-class JsonParser {
-public:
-    JsonParser(const std::string& json) : input(json), pos(0) {}
-
-    JsonValue parse() {
-        skip_whitespace();
-        return parse_value();
-    }
-
-private:
-    char current() const {
-        if (pos >= input.size()) return '\0';
-        return input[pos];
-    }
-
-    char next() {
-        if (pos >= input.size()) return '\0';
-        return input[++pos];
-    }
-
-    void skip_whitespace() {
-        while (pos < input.size() && std::isspace(static_cast<unsigned char>(input[pos]))) {
-            pos++;
+    // POSIX命令执行
+    static std::string execute_posix(const std::vector<std::string>& args) {
+        // 准备参数数组
+        std::vector<char*> argv;
+        for (const auto& arg : args) {
+            argv.push_back(const_cast<char*>(arg.c_str()));
         }
-    }
+        argv.push_back(nullptr);
 
-    void expect(char c) {
-        if (current() != c) {
-            throw parse_error("Expected '" + std::string(1, c) + "'");
+        // 创建管道
+        int pipefd[2];
+        if (pipe(pipefd) == -1) {
+            throw std::runtime_error("Failed to create pipe");
         }
-        next();
-    }
 
-    JsonValue parse_value() {
-        skip_whitespace();
-        char c = current();
-        switch (c) {
-            case 'n': return parse_null();
-            case 't': return parse_true();
-            case 'f': return parse_false();
-            case '"': return parse_string();
-            case '[': return parse_array();
-            case '{': return parse_object();
-            case '-': case '0': case '1': case '2': case '3': case '4':
-            case '5': case '6': case '7': case '8': case '9':
-                return parse_number();
-            default:
-                throw parse_error("Unexpected character: " + std::string(1, c));
+        pid_t pid = fork();
+        if (pid == -1) {
+            close(pipefd[0]);
+            close(pipefd[1]);
+            throw std::runtime_error("Failed to fork process");
         }
-    }
 
-    JsonValue parse_null() {
-        expect('n');
-        expect('u');
-        expect('l');
-        expect('l');
-        return JsonValue(nullptr);
-    }
+        if (pid == 0) { // 子进程
+            // 关闭读端
+            close(pipefd[0]);
 
-    JsonValue parse_true() {
-        expect('t');
-        expect('r');
-        expect('u');
-        expect('e');
-        return JsonValue(true);
-    }
+            // 重定向标准输出到管道
+            if (dup2(pipefd[1], STDOUT_FILENO) == -1) {
+                perror("dup2");
+                exit(EXIT_FAILURE);
+            }
+            close(pipefd[1]);
 
-    JsonValue parse_false() {
-        expect('f');
-        expect('a');
-        expect('l');
-        expect('s');
-        expect('e');
-        return JsonValue(false);
-    }
+            // 降低权限
+            if (setgid(getgid()) != 0 || setuid(getuid()) != 0) {
+                perror("setgid/setuid");
+                exit(EXIT_FAILURE);
+            }
 
-    JsonValue parse_string() {
-        expect('"');
+            // 执行命令
+            execvp(argv[0], argv.data());
+            perror("execvp");
+            exit(EXIT_FAILURE);
+        }
+
+        // 父进程
+        close(pipefd[1]); // 关闭写端
+
         std::string result;
-        bool escape = false;
+        char buffer[128];
+        ssize_t count;
 
-        while (pos < input.size()) {
-            char c = current();
+        while ((count = read(pipefd[0], buffer, sizeof(buffer)))) {
+            if (count == -1) {
+                if (errno == EINTR) continue;
+                perror("read");
+                break;
+            }
+            result.append(buffer, count);
+        }
 
-            if (escape) {
-                escape = false;
-                switch (c) {
-                    case '"': result += '"'; break;
-                    case '\\': result += '\\'; break;
-                    case '/': result += '/'; break;
-                    case 'b': result += '\b'; break;
-                    case 'f': result += '\f'; break;
-                    case 'n': result += '\n'; break;
-                    case 'r': result += '\r'; break;
-                    case 't': result += '\t'; break;
-                    case 'u': {
-                        // Unicode转义序列
-                        if (pos + 4 >= input.size()) {
-                            throw parse_error("Incomplete unicode escape");
-                        }
-                        std::string hex = input.substr(pos + 1, 4);
-                        pos += 4;
-                        try {
-                            unsigned int code = std::stoul(hex, nullptr, 16);
-                            // 简化处理：只支持基本多语言平面
-                            if (code <= 0x7F) {
-                                result += static_cast<char>(code);
-                            } else if (code <= 0x7FF) {
-                                result += static_cast<char>(0xC0 | (code >> 6));
-                                result += static_cast<char>(0x80 | (code & 0x3F));
-                            } else {
-                                result += static_cast<char>(0xE0 | (code >> 12));
-                                result += static_cast<char>(0x80 | ((code >> 6) & 0x3F));
-                                result += static_cast<char>(0x80 | (code & 0x3F));
-                            }
-                        } catch (...) {
-                            throw parse_error("Invalid unicode escape: \\u" + hex);
-                        }
-                        break;
-                    }
-                    default:
-                        throw parse_error("Invalid escape sequence: \\" + std::string(1, c));
-                }
+        close(pipefd[0]);
+
+        // 等待子进程结束
+        int status;
+        waitpid(pid, &status, 0);
+
+        if (WIFEXITED(status) && WEXITSTATUS(status) != 0) {
+            throw std::runtime_error("Command exited with non-zero status: " +
+                                     std::to_string(WEXITSTATUS(status)));
+        }
+
+        return result;
+    }
+
+    // Windows参数转义
+    static std::string escape_windows_arg(const std::string& arg) {
+        std::string escaped;
+        for (char c : arg) {
+            if (c == '"') {
+                escaped += "\\\"";
             } else if (c == '\\') {
-                escape = true;
-            } else if (c == '"') {
-                next();
-                return JsonValue(result);
+                escaped += "\\\\";
             } else {
-                result += c;
+                escaped += c;
             }
-
-            next();
         }
-
-        throw parse_error("Unterminated string");
+        return escaped;
     }
 
-    JsonValue parse_number() {
-        size_t start = pos;
-        bool is_double = false;
-
-        if (current() == '-') {
-            next();
-        }
-
-        if (current() == '0') {
-            next();
-        } else if (std::isdigit(current())) {
-            while (std::isdigit(current())) {
-                next();
-            }
-        } else {
-            throw parse_error("Invalid number");
-        }
-
-        if (current() == '.') {
-            is_double = true;
-            next();
-            if (!std::isdigit(current())) {
-                throw parse_error("Invalid number after decimal point");
-            }
-            while (std::isdigit(current())) {
-                next();
-            }
-        }
-
-        if (current() == 'e' || current() == 'E') {
-            is_double = true;
-            next();
-            if (current() == '+' || current() == '-') {
-                next();
-            }
-            if (!std::isdigit(current())) {
-                throw parse_error("Invalid exponent");
-            }
-            while (std::isdigit(current())) {
-                next();
-            }
-        }
-
-        std::string num_str = input.substr(start, pos - start);
-
-        try {
-            if (is_double) {
-                return JsonValue(std::stod(num_str));
-            } else {
-                return JsonValue(std::stoi(num_str));
-            }
-        } catch (...) {
-            throw parse_error("Invalid number format: " + num_str);
-        }
+    // 验证URL格式
+    static bool is_valid_url(const std::string& url) {
+        static const std::regex url_regex(
+                R"(^(https?|ftp):\/\/)"  // 协议
+                R"(([a-zA-Z0-9_-]+\.)+[a-zA-Z]{2,})"  // 域名
+                R"(\/[a-zA-Z0-9_\/\-\.]*)"  // 路径
+                R"(\?[a-zA-Z0-9_=&%-]*)?$)",  // 查询参数
+                std::regex::icase);
+        return std::regex_match(url, url_regex);
     }
 
-    JsonValue parse_array() {
-        expect('[');
-        skip_whitespace();
-
-        JsonArray result;
-
-        if (current() == ']') {
-            next();
-            return JsonValue(result);
+    // 验证参数安全性
+    static bool is_safe_argument(const std::string& arg) {
+        // 禁止命令分隔符
+        if (arg.find(';') != std::string::npos ||
+            arg.find('|') != std::string::npos ||
+            arg.find('&') != std::string::npos ||
+            arg.find('$') != std::string::npos ||
+            arg.find('`') != std::string::npos ||
+            arg.find('>') != std::string::npos ||
+            arg.find('<') != std::string::npos) {
+            return false;
         }
 
-        while (true) {
-            result.push_back(parse_value());
-            skip_whitespace();
-
-            if (current() == ']') {
-                next();
-                break;
-            }
-
-            expect(',');
-            skip_whitespace();
+        // 禁止目录遍历
+        if (arg.find("..") != std::string::npos) {
+            return false;
         }
 
-        return JsonValue(result);
+        return true;
     }
-
-    JsonValue parse_object() {
-        expect('{');
-        skip_whitespace();
-
-        JsonObject result;
-
-        if (current() == '}') {
-            next();
-            return JsonValue(result);
-        }
-
-        while (true) {
-            skip_whitespace();
-            std::string key = parse_string().as_string();
-            skip_whitespace();
-            expect(':');
-            JsonValue value = parse_value();
-            result[key] = value;
-            skip_whitespace();
-
-            if (current() == '}') {
-                next();
-                break;
-            }
-
-            expect(',');
-            skip_whitespace();
-        }
-
-        return JsonValue(result);
-    }
-
-    std::runtime_error parse_error(const std::string& msg) const {
-        size_t line = 1;
-        size_t column = 1;
-        size_t context_start = pos;
-
-        // 查找当前行开始位置
-        while (context_start > 0 && input[context_start - 1] != '\n') {
-            context_start--;
-        }
-
-        // 查找当前行结束位置
-        size_t context_end = pos;
-        while (context_end < input.size() && input[context_end] != '\n') {
-            context_end++;
-        }
-
-        // 计算行号
-        for (size_t i = 0; i < pos; i++) {
-            if (input[i] == '\n') {
-                line++;
-                column = 1;
-            } else {
-                column++;
-            }
-        }
-
-        std::string context = input.substr(context_start, context_end - context_start);
-        std::string indicator = std::string(pos - context_start, ' ') + "^";
-
-        return std::runtime_error(
-                "JSON parse error at line " + std::to_string(line) +
-                ", column " + std::to_string(column) + ": " + msg +
-                "\n" + context + "\n" + indicator
-        );
-    }
-
-    const std::string& input;
-    size_t pos;
 };
+
 // 实用工具类
 class Utils {
 public:
@@ -653,6 +646,9 @@ public:
 
     // 获取有效项目名称
     static std::string get_valid_name(const std::string& input) {
+        if (input.find_first_of(";&|<>`$()") != std::string::npos) {
+            throw std::invalid_argument("Invalid characters in project name");
+        }
         std::string name = input;
 
         // 移除非字母数字字符（允许连字符和下划线）
@@ -682,45 +678,29 @@ public:
         return std::system(command.c_str());
     }
 
-    // 执行命令并获取输出
-    static std::string execute_command_with_output(const std::string& command) {
-#ifdef _WIN32
-        std::string cmd = "cmd /c \"" + command + "\"";
-#else
-        std::string cmd = command;
-#endif
+    // 安全执行命令（使用SafeCommandExecutor）
+    static std::string safe_execute_command(const std::vector<std::string>& args) {
+        return SafeCommandExecutor::execute(args);
+    }
 
-        std::array<char, 128> buffer;
-        std::string result;
-        std::unique_ptr<FILE, decltype(&pclose)> pipe(popen(cmd.c_str(), "r"), pclose);
+    // 安全下载文件
+    static bool safe_download_file(const std::string& url, const fs::path& output_path) {
+        return SafeCommandExecutor::download_file(url, output_path);
+    }
 
-        if (!pipe) {
-            throw std::runtime_error("popen() failed!");
-        }
+    // 安全解压文件
+    static bool safe_unzip_file(const fs::path& zip_file, const fs::path& output_dir) {
+        return SafeCommandExecutor::unzip_file(zip_file, output_dir);
+    }
 
-        while (fgets(buffer.data(), buffer.size(), pipe.get()) != nullptr) {
-            result += buffer.data();
-        }
-
-        return result;
+    // 安全创建目录
+    static bool safe_create_directory(const fs::path& path) {
+        return SafeCommandExecutor::safe_create_directory(path);
     }
 
     // 跨平台路径拼接
     static fs::path join_paths(const fs::path& base, const std::string& part) {
         return base / part;
-    }
-
-    // 安全创建目录
-    static bool safe_create_directory(const fs::path& path) {
-        try {
-            if (!fs::exists(path)) {
-                return fs::create_directories(path);
-            }
-            return true;
-        } catch (const fs::filesystem_error& e) {
-            std::cerr << "Error creating directory: " << e.what() << std::endl;
-            return false;
-        }
     }
 
     // 安全写入文件
@@ -750,19 +730,6 @@ public:
         }
     }
 
-    // 下载文件
-    static bool download_file(const std::string& url, const fs::path& output_path) {
-        std::string command;
-#ifdef _WIN32
-        command = "curl -L -o \"" + output_path.string() + "\" \"" + url + "\"";
-#else
-        command = "curl -L -o \"" + output_path.string() + "\" \"" + url + "\"";
-#endif
-
-        int result = execute_command(command);
-        return result == 0;
-    }
-
     // 简单字符串修剪
     static std::string trim(const std::string& str) {
         auto start = std::find_if_not(str.begin(), str.end(), [](int c) {
@@ -773,60 +740,38 @@ public:
         }).base();
         return (start < end) ? std::string(start, end) : std::string();
     }
+
+    // 解析简单JSON
     static std::unordered_map<std::string, std::string> parse_simple_json(const std::string& json) {
         try {
-            JsonParser parser(json);
-            JsonValue value = parser.parse();
-
-            if (!value.is_object()) {
-                throw std::runtime_error("Expected JSON object");
-            }
-
+            // 简化实现，实际项目中应使用完整JSON解析器
             std::unordered_map<std::string, std::string> result;
-            for (const auto& [key, val] : value.as_object()) {
-                if (val.is_string()) {
-                    result[key] = val.as_string();
-                } else {
-                    result[key] = val.to_string();
+            std::istringstream stream(json);
+            std::string line;
+
+            while (std::getline(stream, line)) {
+                line = trim(line);
+                if (line.empty() || line == "{" || line == "}") continue;
+
+                // 移除逗号和引号
+                line.erase(std::remove(line.begin(), line.end(), '"'), line.end());
+                line.erase(std::remove(line.begin(), line.end(), ','), line.end());
+
+                // 分割键值对
+                size_t colon_pos = line.find(':');
+                if (colon_pos != std::string::npos) {
+                    std::string key = trim(line.substr(0, colon_pos));
+                    std::string value = trim(line.substr(colon_pos + 1));
+                    result[key] = value;
                 }
             }
+
             return result;
         } catch (const std::exception& e) {
             std::cerr << "JSON parse error: " << e.what() << std::endl;
             return {};
         }
     }
-
-    // 新增方法：解析完整JSON
-    static JsonValue parse_json(const std::string& json) {
-        JsonParser parser(json);
-        return parser.parse();
-    }
-    // 简单JSON解析（仅用于库信息）
-    /*static std::unordered_map<std::string, std::string> parse_simple_json(const std::string& json) {
-        std::unordered_map<std::string, std::string> result;
-        std::istringstream stream(json);
-        std::string line;
-
-        while (std::getline(stream, line)) {
-            line = trim(line);
-            if (line.empty() || line == "{" || line == "}") continue;
-
-            // 移除逗号和引号
-            line.erase(std::remove(line.begin(), line.end(), '"'), line.end());
-            line.erase(std::remove(line.begin(), line.end(), ','), line.end());
-
-            // 分割键值对
-            size_t colon_pos = line.find(':');
-            if (colon_pos != std::string::npos) {
-                std::string key = trim(line.substr(0, colon_pos));
-                std::string value = trim(line.substr(colon_pos + 1));
-                result[key] = value;
-            }
-        }
-
-        return result;
-    }*/
 };
 
 // 库信息提供者接口
@@ -900,7 +845,7 @@ public:
         std::string lib_info_url = mirror_url_ + lib_name + ".json";
         fs::path temp_file = fs::temp_directory_path() / (lib_name + "_info.json");
 
-        if (!Utils::download_file(lib_info_url, temp_file)) {
+        if (!Utils::safe_download_file(lib_info_url, temp_file)) {
             std::cerr << "Failed to download library info for " << lib_name << std::endl;
             return std::nullopt;
         }
@@ -942,7 +887,7 @@ public:
         std::string list_url = mirror_url_ + "libraries.json";
         fs::path temp_file = fs::temp_directory_path() / "library_list.json";
 
-        if (!Utils::download_file(list_url, temp_file)) {
+        if (!Utils::safe_download_file(list_url, temp_file)) {
             std::cerr << "Failed to download library list" << std::endl;
             return false;
         }
@@ -1074,6 +1019,10 @@ private:
             std::cout << "Enter " << config.name << " compiler path: ";
             std::string path;
             std::getline(std::cin, path);
+            return Utils::clean_path(path);
+            if (path.find_first_of(";&|<>`$()") != std::string::npos) {
+                throw std::invalid_argument("Invalid characters in compiler path");
+            }
             return Utils::clean_path(path);
         }
 
@@ -1279,6 +1228,10 @@ private:
             std::string path;
             std::getline(std::cin, path);
             return Utils::clean_path(path);
+            if (path.find_first_of(";&|<>`$()") != std::string::npos) {
+                throw std::invalid_argument("Invalid characters in debugger path");
+            }
+            return Utils::clean_path(path);
         }
 
         if (debugger_paths.size() == 1) {
@@ -1395,18 +1348,17 @@ public:
                 }
         };
     }
-#ifdef _WIN32
-    static bool use_ascii_output;
 
+    // 创建目录结构
     static bool create_directory_recursive(const fs::path& base_path, const DirectoryNode& node,
                                            int depth = 0, const std::string& prefix = "") {
         const fs::path current_path = Utils::join_paths(base_path, node.name);
         const std::string indent(depth * 2, ' ');
 
         // 定义替代字符
-        const std::string vertical_line = use_ascii_output ? "|" : "\u2502";
-        const std::string branch_line = use_ascii_output ? "|-- " : "\u251c\u2500\u2500 ";
-        const std::string space_fill = use_ascii_output ? "    " : "    ";
+        const std::string vertical_line = "|";
+        const std::string branch_line = "|-- ";
+        const std::string space_fill = "    ";
 
         // 使用树状结构前缀
         std::string tree_prefix;
@@ -1450,237 +1402,12 @@ public:
             return false;
         }
     }
-#endif
-#if defined(__linux__) || defined(__APPLE__)
-    static bool create_directory_recursive(const fs::path& base_path, const DirectoryNode& node,
-                                           int depth = 0, const std::string& prefix = "") {
-        const fs::path current_path = Utils::join_paths(base_path, node.name);
-        const std::string indent(depth * 2, ' ');
-
-        // 使用树状结构前缀
-        std::string tree_prefix;
-        if (depth > 0) {
-            tree_prefix = prefix + (depth > 1 ? "│   " : "") + (depth > 0 ? "├── " : "");
-        }
-
-        // 显示当前目录
-        std::cout << tree_prefix << node.name;
-
-        try {
-            if (!fs::exists(current_path)) {
-                if (Utils::safe_create_directory(current_path)) {
-                    std::cout << " ✓" << "\n";
-                } else {
-                    std::cout << " ✗" << "\n";
-                    return false;
-                }
-            } else {
-                std::cout << " ✓" << "\n";
-            }
-
-            // 处理子目录
-            std::string child_prefix = prefix + (depth > 0 ? "│   " : "");
-            for (size_t i = 0; i < node.children.size(); i++) {
-                const auto& child = node.children[i];
-
-                // 判断是否是最后一个子节点
-                bool is_last = (i == node.children.size() - 1);
-                std::string new_prefix = is_last ? "    " : "│   ";
-
-                if (!create_directory_recursive(current_path, child, depth + 1,
-                                                child_prefix + new_prefix)) {
-                    return false;
-                }
-            }
-
-            return true;
-        } catch (const fs::filesystem_error& e) {
-            std::cout << " ✗ (" << e.what() << ")" << std::endl;
-            return false;
-        }
-    }
-#endif
 };
 
-// 初始化静态成员
-#ifdef _WIN32
-    bool ProjectStructureService::use_ascii_output = true;
-#endif
-// SHA256计算类
-class SHA256 {
-private:
-    static constexpr std::array<uint32_t, 64> K = {
-            0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
-            0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174,
-            0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc, 0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da,
-            0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7, 0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967,
-            0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13, 0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85,
-            0xa2bfe8a1, 0xa81a664b, 0xc24b8b70, 0xc76c51a3, 0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070,
-            0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3,
-            0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2
-    };
-
-    std::array<uint32_t, 8> state = {
-            0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a,
-            0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19
-    };
-
-    static uint32_t rotr(uint32_t x, uint32_t n) {
-        return (x >> n) | (x << (32 - n));
-    }
-
-    static uint32_t ch(uint32_t x, uint32_t y, uint32_t z) {
-        return (x & y) ^ (~x & z);
-    }
-
-    static uint32_t maj(uint32_t x, uint32_t y, uint32_t z) {
-        return (x & y) ^ (x & z) ^ (y & z);
-    }
-
-    static uint32_t sigma0(uint32_t x) {
-        return rotr(x, 2) ^ rotr(x, 13) ^ rotr(x, 22);
-    }
-
-    static uint32_t sigma1(uint32_t x) {
-        return rotr(x, 6) ^ rotr(x, 11) ^ rotr(x, 25);
-    }
-
-    static uint32_t gamma0(uint32_t x) {
-        return rotr(x, 7) ^ rotr(x, 18) ^ (x >> 3);
-    }
-
-    static uint32_t gamma1(uint32_t x) {
-        return rotr(x, 17) ^ rotr(x, 19) ^ (x >> 10);
-    }
-
-    void transform(const uint8_t* data) {
-        std::array<uint32_t, 64> W = {0};
-
-        // 将数据分成16个32位字（大端序）
-        for (int i = 0; i < 16; i++) {
-            W[i] = (static_cast<uint32_t>(data[i*4]) << 24) |
-                   (static_cast<uint32_t>(data[i*4+1]) << 16) |
-                   (static_cast<uint32_t>(data[i*4+2]) << 8) |
-                   (static_cast<uint32_t>(data[i*4+3]));
-        }
-
-        // 扩展消息
-        for (int i = 16; i < 64; i++) {
-            W[i] = gamma1(W[i-2]) + W[i-7] + gamma0(W[i-15]) + W[i-16];
-        }
-
-        auto a = state[0];
-        auto b = state[1];
-        auto c = state[2];
-        auto d = state[3];
-        auto e = state[4];
-        auto f = state[5];
-        auto g = state[6];
-        auto h = state[7];
-
-        // 主循环
-        for (int i = 0; i < 64; i++) {
-            uint32_t T1 = h + sigma1(e) + ch(e, f, g) + K[i] + W[i];
-            uint32_t T2 = sigma0(a) + maj(a, b, c);
-            h = g;
-            g = f;
-            f = e;
-            e = d + T1;
-            d = c;
-            c = b;
-            b = a;
-            a = T1 + T2;
-        }
-
-        state[0] += a;
-        state[1] += b;
-        state[2] += c;
-        state[3] += d;
-        state[4] += e;
-        state[5] += f;
-        state[6] += g;
-        state[7] += h;
-    }
-
-public:
-    static std::string hash_file(const fs::path& file_path) {
-        std::ifstream file(file_path, std::ios::binary);
-        if (!file) {
-            throw std::runtime_error("Can't open the file: " + file_path.string());
-        }
-
-        SHA256 sha;
-        std::array<uint8_t, 64> buffer = {0};
-        uint64_t total_bytes = 0;
-        bool processed_last_block = false;
-
-        while (!processed_last_block) {
-            file.read(reinterpret_cast<char*>(buffer.data()), 64);
-            size_t bytes_read = file.gcount();
-            total_bytes += bytes_read;
-
-            if (bytes_read < 64) {
-                // 处理最后一块数据
-                buffer[bytes_read] = 0x80; // 填充起始位
-
-                // 如果当前块空间不足，先处理这个块再创建新块
-                if (bytes_read >= 56) {
-                    // 填充剩余部分为0
-                    for (size_t i = bytes_read + 1; i < 64; i++) {
-                        buffer[i] = 0;
-                    }
-                    sha.transform(buffer.data());
-
-                    // 创建新块用于存放长度
-                    buffer.fill(0);
-                    // 在最后8字节写入位长度（大端序）
-                    uint64_t bit_length = total_bytes * 8;
-                    for (int i = 0; i < 8; i++) {
-                        buffer[63 - i] = static_cast<uint8_t>(bit_length >> (i * 8));
-                    }
-                    sha.transform(buffer.data());
-                } else {
-                    // 在当前块填充0和长度
-                    for (size_t i = bytes_read + 1; i < 56; i++) {
-                        buffer[i] = 0;
-                    }
-                    // 在最后8字节写入位长度（大端序）
-                    uint64_t bit_length = total_bytes * 8;
-                    for (int i = 0; i < 8; i++) {
-                        buffer[63 - i] = static_cast<uint8_t>(bit_length >> (i * 8));
-                    }
-                    sha.transform(buffer.data());
-                }
-                processed_last_block = true;
-            } else {
-                // 处理完整数据块
-                sha.transform(buffer.data());
-            }
-        }
-
-        // 转换为十六进制字符串
-        std::ostringstream result;
-        result << std::hex << std::setfill('0');
-        for (uint32_t val : sha.state) {
-            result << std::setw(8) << val;
-        }
-
-        return result.str();
-    }
-};
-// 第三方库服务
+// 库服务
 class LibraryService {
 private:
     static std::unique_ptr<ILibraryInfoProvider> provider_;
-
-    // 获取解压命令
-    static std::string get_unzip_command(const fs::path& zip_file, const fs::path& output_dir) {
-#ifdef _WIN32
-        return "powershell -command \"Expand-Archive -Path '" + zip_file.string() + "' -DestinationPath '" + output_dir.string() + "'\"";
-#else
-        return "unzip -o \"" + zip_file.string() + "\" -d \"" + output_dir.string() + "\"";
-#endif
-    }  // 这里加上结束大括号
 
     // 创建第三方库目录
     static void create_third_party_dir(const fs::path& project_path) {
@@ -1776,7 +1503,7 @@ public:
         }
     }
 
-    // 下载并解压库文件（多线程版本）
+    // 下载并解压库文件
     static bool download_and_extract_library(const fs::path& project_path, const ThirdPartyLibrary& lib) {
         const fs::path third_party_dir = project_path / "third_party";
         const fs::path zip_file = third_party_dir / (lib.name + ".zip");
@@ -1784,42 +1511,34 @@ public:
         std::cout << "\nDownloading " << lib.name << "...\n";
 
         // 下载文件
-        if (!Utils::download_file(lib.downloadUrl, zip_file)) {
+        if (!Utils::safe_download_file(lib.downloadUrl, zip_file)) {
             std::cerr << "Failed to download " << lib.name << std::endl;
+            return false;
+        }
+
+        std::cout << "Verifying SHA256 checksum...\n";
+        try {
+            std::string calculated_sha = SHA256::hash_file(zip_file);
+            std::transform(calculated_sha.begin(), calculated_sha.end(), calculated_sha.begin(), ::tolower);
+
+            if (calculated_sha != lib.sha256) {
+                std::cerr << "SHA256 verification failed!\n";
+                std::cerr << "Expected: " << lib.sha256 << "\n";
+                std::cerr << "Actual:   " << calculated_sha << "\n";
+                fs::remove(zip_file);
+                return false;
+            }
+            std::cout << "SHA256 verification passed.\n";
+        } catch (const std::exception& e) {
+            std::cerr << "Error during SHA256 calculation: " << e.what() << std::endl;
+            fs::remove(zip_file);
             return false;
         }
 
         std::cout << "Extracting " << lib.name << "...\n";
 
-        // 验证SHA256
-        if (!lib.sha256.empty()) {
-            std::cout << "Verifying SHA256 checksum...\n";
-            try {
-                std::string calculated_sha = SHA256::hash_file(zip_file);
-                std::transform(calculated_sha.begin(), calculated_sha.end(), calculated_sha.begin(), ::tolower);
-
-                if (calculated_sha != lib.sha256) {
-                    std::cerr << "SHA256 verification failed!\n";
-                    std::cerr << "Expected: " << lib.sha256 << "\n";
-                    std::cerr << "Actual:   " << calculated_sha << "\n";
-                    fs::remove(zip_file);
-                    return false;
-                }
-                std::cout << "SHA256 verification passed.\n";
-            } catch (const std::exception& e) {
-                std::cerr << "Error during SHA256 calculation: " << e.what() << std::endl;
-                fs::remove(zip_file);
-                return false;
-            }
-        } else {
-            std::cout << "Warning: No SHA256 provided for " << lib.name << ", skipping verification.\n";
-        }
-
         // 解压文件
-        std::string unzip_cmd = get_unzip_command(zip_file, third_party_dir);
-        int result = Utils::execute_command(unzip_cmd);
-
-        if (result != 0) {
+        if (!Utils::safe_unzip_file(zip_file, third_party_dir)) {
             std::cerr << "Failed to extract " << lib.name << std::endl;
             return false;
         }
@@ -1836,7 +1555,7 @@ public:
         return true;
     }
 
-    // 添加第三方库到项目（多线程版本）
+    // 添加第三方库到项目
     static void add_third_party_library(const fs::path& project_path, const std::string& lib_name) {
         static std::set<std::string> installed_libs;
         static std::mutex mtx;
@@ -2105,7 +1824,6 @@ private:
 
         Utils::safe_write_file(vscode_dir / "tasks.json", content);
     }
-
     // 生成launch.json
     static void generate_launch_json(const fs::path& vscode_dir, const std::string& project_name,
                                      const CompilerConfig& compiler, const DebuggerConfig& debugger) {
@@ -2375,7 +2093,7 @@ public:
     static void print_version() {
         Logo();
         std::cout << "SLN2Code\n"
-                  << "Version: " << Constants::VERSION <<" Alpha"<< "\n"
+                  << "Version: " << Constants::VERSION <<" Beta"<< "\n"
                   << "Maintainer: Macintosh-Maisensei\n"
                   << "Contributors: None\n"
                   << "https://github.com/Macintosh-MaiSensei/SLN2Code\n"
@@ -2412,7 +2130,7 @@ int main(int argc, char* argv[]) {
         // 交互式输入（如果没有通过命令行指定）
         if (options.project_name == Constants::DEFAULT_PROJECT_NAME) {
             Logo();
-            std::cout << Constants::VERSION << " Alpha|"
+            std::cout << Constants::VERSION << " Beta|"
                       << "https://github.com/Macintosh-MaiSensei/SLN2Code|"
                       << "Maintainer: Macintosh-Maisensei\n"
                       << "Contributors: None\n"
