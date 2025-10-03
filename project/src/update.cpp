@@ -1390,123 +1390,132 @@ public:
          {"third_party", {}},
          {"docs", {}}}};
   }
+  // 设置是否使用Unicode符号
+  static bool use_unicode_symbols;
 
-  // 创建目录结构
-#ifdef _WIN32
-  static bool use_ascii_output;
-
+#if defined(_WIN32)
   static bool create_directory_recursive(const fs::path &base_path,
                                          const DirectoryNode &node,
                                          int depth = 0,
                                          const std::string &prefix = "") {
+    // Windows 默认使用 ASCII 字符
+    const std::string vertical_line = "|";
+    const std::string branch = "|-- ";
+    const std::string last_branch = "`-- ";
+    const std::string space_fill = "    ";
+    const std::string success_mark = " [OK]";
+    const std::string fail_mark = " [FAIL]";
+    const std::string exist_mark = " [EXIST]";
+    
+    return create_directory_recursive_impl(
+        base_path, node, depth, prefix, 
+        vertical_line, branch, last_branch, space_fill,
+        success_mark, fail_mark, exist_mark);
+  }
+#else
+  static bool create_directory_recursive(const fs::path &base_path,
+                                         const DirectoryNode &node,
+                                         int depth = 0,
+                                         const std::string &prefix = "") {
+    // Linux/macOS 根据设置选择字符
+    if (use_unicode_symbols) {
+      const std::string vertical_line = "│";
+      const std::string branch = "├── ";
+      const std::string last_branch = "└── ";
+      const std::string space_fill = "    ";
+      const std::string success_mark = " ✓";
+      const std::string fail_mark = " ✗";
+      const std::string exist_mark = " ✓";
+      
+      return create_directory_recursive_impl(
+          base_path, node, depth, prefix, 
+          vertical_line, branch, last_branch, space_fill,
+          success_mark, fail_mark, exist_mark);
+    } else {
+      const std::string vertical_line = "|";
+      const std::string branch = "|-- ";
+      const std::string last_branch = "`-- ";
+      const std::string space_fill = "    ";
+      const std::string success_mark = " [OK]";
+      const std::string fail_mark = " [FAIL]";
+      const std::string exist_mark = " [EXIST]";
+      
+      return create_directory_recursive_impl(
+          base_path, node, depth, prefix, 
+          vertical_line, branch, last_branch, space_fill,
+          success_mark, fail_mark, exist_mark);
+    }
+  }
+#endif
+
+private:
+  // 统一的实现函数
+  static bool create_directory_recursive_impl(
+      const fs::path &base_path,
+      const DirectoryNode &node,
+      int depth,
+      const std::string &prefix,
+      const std::string &vertical_line,
+      const std::string &branch,
+      const std::string &last_branch,
+      const std::string &space_fill,
+      const std::string &success_mark,
+      const std::string &fail_mark,
+      const std::string &exist_mark) {
+      
     const fs::path current_path = Utils::join_paths(base_path, node.name);
-    const std::string indent(depth * 2, ' ');
-
-    // 定义替代字符
-    const std::string vertical_line = use_ascii_output ? "|" : "\u2502";
-    const std::string branch_line =
-        use_ascii_output ? "|-- " : "\u251c\u2500\u2500 ";
-    const std::string space_fill = use_ascii_output ? "    " : "    ";
-
-    // 使用树状结构前缀
     std::string tree_prefix;
+
     if (depth > 0) {
-      tree_prefix = prefix + (depth > 1 ? vertical_line + "   " : "") +
-                    (depth > 0 ? branch_line : "");
+      tree_prefix = prefix + (depth > 1 ? vertical_line + "   " : "") 
+                  + (depth > 0 ? branch : "");
     }
 
-    // 显示当前目录
     std::cout << tree_prefix << node.name;
 
     try {
       if (!fs::exists(current_path)) {
         if (Utils::safe_create_directory(current_path)) {
-          std::cout << " ...done" << "\n";
+          std::cout << success_mark << "\n";
         } else {
-          std::cout << " ...failed" << "\n";
+          std::cout << fail_mark << "\n";
           return false;
         }
       } else {
-        std::cout << " ...done" << "\n";
+        std::cout << exist_mark << "\n";
       }
 
-      // 处理子目录
-      std::string child_prefix =
-          prefix + (depth > 0 ? vertical_line + "   " : "");
+      std::string child_prefix = prefix + (depth > 0 ? vertical_line + "   " : "");
       for (size_t i = 0; i < node.children.size(); i++) {
         const auto &child = node.children[i];
-
-        // 判断是否是最后一个子节点
         bool is_last = (i == node.children.size() - 1);
+        
         std::string new_prefix = is_last ? space_fill : vertical_line + "   ";
+        std::string new_branch = is_last ? last_branch : branch;
 
-        if (!create_directory_recursive(current_path, child, depth + 1,
-                                        child_prefix + new_prefix)) {
+        if (!create_directory_recursive_impl(
+                current_path, child, depth + 1, 
+                child_prefix + new_branch,
+                vertical_line, branch, last_branch, space_fill,
+                success_mark, fail_mark, exist_mark)) {
           return false;
         }
       }
 
       return true;
     } catch (const fs::filesystem_error &e) {
-      std::cout << " ...failed (" << e.what() << ")" << std::endl;
+      std::cout << " [ERROR] " << e.what() << "\n";
       return false;
     }
   }
-#endif
-#if defined(__linux__) || defined(__APPLE__)
-  static bool create_directory_recursive(const fs::path &base_path,
-                                         const DirectoryNode &node,
-                                         int depth = 0,
-                                         const std::string &prefix = "") {
-    const fs::path current_path = Utils::join_paths(base_path, node.name);
-    const std::string indent(depth * 2, ' ');
-
-    // 使用树状结构前缀
-    std::string tree_prefix;
-    if (depth > 0) {
-      tree_prefix =
-          prefix + (depth > 1 ? "│   " : "") + (depth > 0 ? "├── " : "");
-    }
-
-    // 显示当前目录
-    std::cout << tree_prefix << node.name;
-
-    try {
-      if (!fs::exists(current_path)) {
-        if (Utils::safe_create_directory(current_path)) {
-          std::cout << " ✓" << "\n";
-        } else {
-          std::cout << " ✗" << "\n";
-          return false;
-        }
-      } else {
-        std::cout << " ✓" << "\n";
-      }
-
-      // 处理子目录
-      std::string child_prefix = prefix + (depth > 0 ? "│   " : "");
-      for (size_t i = 0; i < node.children.size(); i++) {
-        const auto &child = node.children[i];
-
-        // 判断是否是最后一个子节点
-        bool is_last = (i == node.children.size() - 1);
-        std::string new_prefix = is_last ? "    " : "│   ";
-
-        if (!create_directory_recursive(current_path, child, depth + 1,
-                                        child_prefix + new_prefix)) {
-          return false;
-        }
-      }
-
-      return true;
-    } catch (const fs::filesystem_error &e) {
-      std::cout << " ✗ (" << e.what() << ")" << std::endl;
-      return false;
-    }
-  }
-#endif
 };
 
+// 初始化静态成员变量
+#ifdef _WIN32
+  bool ProjectStructureService::use_unicode_symbols = false;
+#else
+  bool ProjectStructureService::use_unicode_symbols = true;
+#endif
 // 库服务
 class LibraryService {
 private:
