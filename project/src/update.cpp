@@ -1406,11 +1406,10 @@ public:
     const std::string success_mark = " [OK]";
     const std::string fail_mark = " [FAIL]";
     const std::string exist_mark = " [EXIST]";
-    
+
     return create_directory_recursive_impl(
-        base_path, node, depth, prefix, 
-        vertical_line, branch, last_branch, space_fill,
-        success_mark, fail_mark, exist_mark);
+        base_path, node, depth, prefix, vertical_line, branch, last_branch,
+        space_fill, success_mark, fail_mark, exist_mark);
   }
 #else
   static bool create_directory_recursive(const fs::path &base_path,
@@ -1423,14 +1422,14 @@ public:
       const std::string branch = "├── ";
       const std::string last_branch = "└── ";
       const std::string space_fill = "    ";
-      const std::string success_mark = " ✓";
-      const std::string fail_mark = " ✗";
-      const std::string exist_mark = " ✓";
-      
+      const std::string success_mark = "\033[32m ✓\033[0m";
+      const std::string fail_mark = "\033[31m ✗\033[0m";
+      ;
+      const std::string exist_mark = "\033[32m ✓\033[0m";
+
       return create_directory_recursive_impl(
-          base_path, node, depth, prefix, 
-          vertical_line, branch, last_branch, space_fill,
-          success_mark, fail_mark, exist_mark);
+          base_path, node, depth, prefix, vertical_line, branch, last_branch,
+          space_fill, success_mark, fail_mark, exist_mark);
     } else {
       const std::string vertical_line = "|";
       const std::string branch = "|-- ";
@@ -1439,11 +1438,10 @@ public:
       const std::string success_mark = " [OK]";
       const std::string fail_mark = " [FAIL]";
       const std::string exist_mark = " [EXIST]";
-      
+
       return create_directory_recursive_impl(
-          base_path, node, depth, prefix, 
-          vertical_line, branch, last_branch, space_fill,
-          success_mark, fail_mark, exist_mark);
+          base_path, node, depth, prefix, vertical_line, branch, last_branch,
+          space_fill, success_mark, fail_mark, exist_mark);
     }
   }
 #endif
@@ -1451,24 +1449,18 @@ public:
 private:
   // 统一的实现函数
   static bool create_directory_recursive_impl(
-      const fs::path &base_path,
-      const DirectoryNode &node,
-      int depth,
-      const std::string &prefix,
-      const std::string &vertical_line,
-      const std::string &branch,
-      const std::string &last_branch,
-      const std::string &space_fill,
-      const std::string &success_mark,
-      const std::string &fail_mark,
-      const std::string &exist_mark) {
-      
+      const fs::path &base_path, const DirectoryNode &node, int depth,
+      const std::string &prefix, const std::string &vertical_line,
+      const std::string &branch, const std::string &last_branch,
+      const std::string &space_fill, const std::string &success_mark,
+      const std::string &fail_mark, const std::string &exist_mark) {
+
     const fs::path current_path = Utils::join_paths(base_path, node.name);
     std::string tree_prefix;
 
     if (depth > 0) {
-      tree_prefix = prefix + (depth > 1 ? vertical_line + "   " : "") 
-                  + (depth > 0 ? branch : "");
+      tree_prefix = prefix + (depth > 1 ? vertical_line + "   " : "") +
+                    (depth > 0 ? branch : "");
     }
 
     std::cout << tree_prefix << node.name;
@@ -1485,19 +1477,19 @@ private:
         std::cout << exist_mark << "\n";
       }
 
-      std::string child_prefix = prefix + (depth > 0 ? vertical_line + "   " : "");
+      std::string child_prefix =
+          prefix + (depth > 0 ? vertical_line + "   " : "");
       for (size_t i = 0; i < node.children.size(); i++) {
         const auto &child = node.children[i];
         bool is_last = (i == node.children.size() - 1);
-        
+
         std::string new_prefix = is_last ? space_fill : vertical_line + "   ";
         std::string new_branch = is_last ? last_branch : branch;
 
         if (!create_directory_recursive_impl(
-                current_path, child, depth + 1, 
-                child_prefix + new_branch,
-                vertical_line, branch, last_branch, space_fill,
-                success_mark, fail_mark, exist_mark)) {
+                current_path, child, depth + 1, child_prefix + new_branch,
+                vertical_line, branch, last_branch, space_fill, success_mark,
+                fail_mark, exist_mark)) {
           return false;
         }
       }
@@ -1512,9 +1504,9 @@ private:
 
 // 初始化静态成员变量
 #ifdef _WIN32
-  bool ProjectStructureService::use_unicode_symbols = false;
+bool ProjectStructureService::use_unicode_symbols = false;
 #else
-  bool ProjectStructureService::use_unicode_symbols = true;
+bool ProjectStructureService::use_unicode_symbols = true;
 #endif
 // 库服务
 class LibraryService {
