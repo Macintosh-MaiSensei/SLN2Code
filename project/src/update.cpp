@@ -1,4 +1,4 @@
-/*Created by Macintosh-MaiSensei on 2025/10/4.*/
+/*Created by Macintosh-MaiSensei on 2025/9/16.*/
 /*Version 1.0.3 Beta*/
 #include <algorithm>
 #include <array>
@@ -24,7 +24,6 @@
 #include <set>
 #include <sstream>
 #include <string>
-#include <sys/wait.h>
 #include <thread>
 #include <unistd.h>
 #include <unordered_map>
@@ -39,6 +38,7 @@
 #else
 #include <cstdio>
 #include <sys/types.h>
+#include <sys/wait.h>
 #endif
 
 namespace fs = std::filesystem;
@@ -331,27 +331,26 @@ public:
       throw std::invalid_argument("Command arguments cannot be empty");
     }
 
-    // 验证每个参数
+    // Validate each argument
     for (const auto &arg : args) {
       if (!is_safe_argument(arg)) {
         throw std::runtime_error("Unsafe argument detected: " + arg);
       }
     }
 
-    // 记录执行的命令（用于调试）
+    // Build the command string for logging
     std::string command_str;
     for (const auto &arg : args) {
       command_str += arg + " ";
     }
     std::cout << "Executing safe command: " << command_str << std::endl;
 
-#ifdef _WIN32
-    return execute_windows(args);
-#else
-    return execute_posix(args);
-#endif
+    // Return the constructed command string (trim trailing space)
+    if (!command_str.empty()) {
+      command_str.pop_back(); // Remove the trailing space
+    }
+    return command_str;
   }
-
   // 安全下载文件
   static bool download_file(const std::string &url,
                             const fs::path &output_path) {
@@ -451,22 +450,24 @@ public:
   }
 
 private:
-  // Windows命令执行
-  static std::string execute_windows(const std::vector<std::string> &args) {
+  // POSIX命令执行
+  static std::string execute_posix(const std::vector<std::string> &args) {
+#ifdef _WIN32
+    // Windows版本使用_popen
     std::string command;
     for (const auto &arg : args) {
       if (!command.empty())
         command += " ";
-      command += "\"" + escape_windows_arg(arg) + "\"";
+      command += arg;
     }
 
     std::array<char, 128> buffer;
     std::string result;
-    std::unique_ptr<FILE, decltype(&pclose)> pipe(popen(command.c_str(), "r"),
-                                                  pclose);
+    std::unique_ptr<FILE, decltype(&_pclose)> pipe(_popen(command.c_str(), "r"),
+                                                   _pclose);
 
     if (!pipe) {
-      throw std::runtime_error("popen() failed!");
+      throw std::runtime_error("_popen() failed!");
     }
 
     while (fgets(buffer.data(), buffer.size(), pipe.get()) != nullptr) {
@@ -474,10 +475,8 @@ private:
     }
 
     return result;
-  }
-
-  // POSIX命令执行
-  static std::string execute_posix(const std::vector<std::string> &args) {
+#else
+    // 原有的POSIX实现
     // 准备参数数组
     std::vector<char *> argv;
     for (const auto &arg : args) {
@@ -509,7 +508,7 @@ private:
       }
       close(pipefd[1]);
 
-      // 降低权限
+      // 降低权限（仅在Unix系统上）
       if (setgid(getgid()) != 0 || setuid(getuid()) != 0) {
         perror("setgid/setuid");
         exit(EXIT_FAILURE);
@@ -550,6 +549,7 @@ private:
     }
 
     return result;
+#endif
   }
 
   // Windows参数转义
@@ -1412,37 +1412,11 @@ public:
     GetConsoleScreenBufferInfo(hConsole, &consoleInfo);
     WORD originalAttrs = consoleInfo.wAttributes;
 
-    auto print_colored = [&](const std::string& text, WORD color) {
-        SetConsoleTextAttribute(hConsole, color);
-        std::cout << text;
-        SetConsoleTextAttribute(hConsole, originalAttrs);
-    };
-
-    auto colored_impl = [&](const fs::path &base_path,
-                            const DirectoryNode &node,
-                            int depth,
-                            const std::string &prefix,
-                            const std::string &vertical_line,
-                            const std::string &branch,
-                            const std::string &last_branch,
-                            const std::string &space_fill,
-                            const std::string &success_mark,
-                            const std::string &fail_mark,
-                            const std::string &exist_mark) -> bool {
-
-        return create_directory_recursive_impl(
-            base_path, node, depth, prefix, vertical_line, branch, last_branch,
-            space_fill, 
-            [&]() { print_colored(success_mark, FOREGROUND_GREEN | FOREGROUND_INTENSITY); },
-            [&]() { print_colored(fail_mark, FOREGROUND_RED | FOREGROUND_INTENSITY); },
-            [&]() { print_colored(exist_mark, FOREGROUND_GREEN | FOREGROUND_INTENSITY); }
-        );
-    };
-
-    bool result = colored_impl(
+    // 直接调用实现函数，不使用lambda包装器
+    bool result = create_directory_recursive_impl(
         base_path, node, depth, prefix, vertical_line, branch, last_branch,
         space_fill, success_mark, fail_mark, exist_mark);
-    
+
     // 恢复原始控制台属性
     SetConsoleTextAttribute(hConsole, originalAttrs);
     return result;
