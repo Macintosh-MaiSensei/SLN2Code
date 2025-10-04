@@ -1,4 +1,4 @@
-/*Created by Macintosh-MaiSensei on 2025/9/16.*/
+/*Created by Macintosh-MaiSensei on 2025/10/4.*/
 /*Version 1.0.3 Beta*/
 #include <algorithm>
 #include <array>
