@@ -1,4 +1,4 @@
-/*Created by Macintosh-MaiSensei on 2025/9/16.*/
+/*Created by Macintosh-MaiSensei on 2025/10/4.*/
 /*Version 1.0.3 Beta*/
 #include <algorithm>
 #include <array>
@@ -35,6 +35,7 @@
 #define pclose _pclose
 #include <io.h>
 #include <process.h>
+#include <windows.h>
 #else
 #include <cstdio>
 #include <sys/types.h>
@@ -1398,7 +1399,6 @@ public:
                                          const DirectoryNode &node,
                                          int depth = 0,
                                          const std::string &prefix = "") {
-    // Windows 默认使用 ASCII 字符
     const std::string vertical_line = "|";
     const std::string branch = "|-- ";
     const std::string last_branch = "`-- ";
@@ -1407,9 +1407,45 @@ public:
     const std::string fail_mark = " [FAIL]";
     const std::string exist_mark = " [EXIST]";
 
-    return create_directory_recursive_impl(
+    HANDLE hConsole = GetStdHandle(STD_OUTPUT_HANDLE);
+    CONSOLE_SCREEN_BUFFER_INFO consoleInfo;
+    GetConsoleScreenBufferInfo(hConsole, &consoleInfo);
+    WORD originalAttrs = consoleInfo.wAttributes;
+
+    auto print_colored = [&](const std::string& text, WORD color) {
+        SetConsoleTextAttribute(hConsole, color);
+        std::cout << text;
+        SetConsoleTextAttribute(hConsole, originalAttrs);
+    };
+
+    auto colored_impl = [&](const fs::path &base_path,
+                            const DirectoryNode &node,
+                            int depth,
+                            const std::string &prefix,
+                            const std::string &vertical_line,
+                            const std::string &branch,
+                            const std::string &last_branch,
+                            const std::string &space_fill,
+                            const std::string &success_mark,
+                            const std::string &fail_mark,
+                            const std::string &exist_mark) -> bool {
+
+        return create_directory_recursive_impl(
+            base_path, node, depth, prefix, vertical_line, branch, last_branch,
+            space_fill, 
+            [&]() { print_colored(success_mark, FOREGROUND_GREEN | FOREGROUND_INTENSITY); },
+            [&]() { print_colored(fail_mark, FOREGROUND_RED | FOREGROUND_INTENSITY); },
+            [&]() { print_colored(exist_mark, FOREGROUND_GREEN | FOREGROUND_INTENSITY); }
+        );
+    };
+
+    bool result = colored_impl(
         base_path, node, depth, prefix, vertical_line, branch, last_branch,
         space_fill, success_mark, fail_mark, exist_mark);
+    
+    // 恢复原始控制台属性
+    SetConsoleTextAttribute(hConsole, originalAttrs);
+    return result;
   }
 #else
   static bool create_directory_recursive(const fs::path &base_path,
