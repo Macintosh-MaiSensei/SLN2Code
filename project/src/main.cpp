@@ -2298,7 +2298,7 @@ int main(int argc, char *argv[]) {
     // 交互式输入（如果没有通过命令行指定）
     if (options.project_name == Constants::DEFAULT_PROJECT_NAME) {
       Logo();
-      std::cout << Constants::VERSION << " |"
+      std::cout << "Version: "<<Constants::VERSION << " |"
                 << "https://github.com/Macintosh-MaiSensei/SLN2Code|"
                 << "Maintainer: Macintosh-Maisensei\n"
                 << "Contributors: None\n"
