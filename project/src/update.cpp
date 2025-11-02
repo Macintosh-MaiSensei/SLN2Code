@@ -1,5 +1,5 @@
-/*Created by Macintosh-MaiSensei on 2025/10/4.*/
-/*Version 1.0.3 Beta*/
+/*Created by Macintosh-MaiSensei on 2025/11/2.*/
+/*Version 1.0.3 RC*/
 #include <algorithm>
 #include <array>
 #include <atomic>
@@ -2260,7 +2260,7 @@ public:
   static void print_version() {
     Logo();
     std::cout << "SLN2Code\n"
-              << "Version: " << Constants::VERSION << " Beta" << "\n"
+              << "Version: " << Constants::VERSION << "\n"
               << "Maintainer: Macintosh-Maisensei\n"
               << "Contributors: None\n"
               << "https://github.com/Macintosh-MaiSensei/SLN2Code\n"
@@ -2298,7 +2298,7 @@ int main(int argc, char *argv[]) {
     // 交互式输入（如果没有通过命令行指定）
     if (options.project_name == Constants::DEFAULT_PROJECT_NAME) {
       Logo();
-      std::cout << Constants::VERSION << " Beta|"
+      std::cout << Constants::VERSION << " |"
                 << "https://github.com/Macintosh-MaiSensei/SLN2Code|"
                 << "Maintainer: Macintosh-Maisensei\n"
                 << "Contributors: None\n"
