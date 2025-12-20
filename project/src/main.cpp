@@ -1,5 +1,6 @@
 /*Created by Macintosh-MaiSensei on 2025/11/23.*/
 /*Version 1.0.4 Alpha*/
+#include "yaml2json.hpp"
 #include <algorithm>
 #include <array>
 #include <atomic>
@@ -32,6 +33,9 @@
 
 // 包含nlohmann/json库
 #include <json.hpp>
+#ifndef INCLUDE_NLOHMANN_JSON_HPP_
+#include <nlohmann/json.hpp>
+#endif
 
 #ifdef _WIN32
 #define popen _popen
@@ -102,7 +106,7 @@ public:
   std::string sha256;
 
   // 从JSON反序列化
-  static ThirdPartyLibrary from_json(const json& j) {
+  static ThirdPartyLibrary from_json(const json &j) {
     ThirdPartyLibrary lib;
     lib.name = j.value("name", "");
     lib.downloadUrl = j.value("downloadUrl", "");
@@ -110,27 +114,25 @@ public:
     lib.libPath = j.value("libPath", "");
     lib.configInstructions = j.value("configInstructions", "");
     lib.sha256 = j.value("sha256", "");
-    
+
     if (j.contains("dependencies") && j["dependencies"].is_array()) {
-      for (const auto& dep : j["dependencies"]) {
+      for (const auto &dep : j["dependencies"]) {
         lib.dependencies.push_back(dep.get<std::string>());
       }
     }
-    
+
     return lib;
   }
 
   // 序列化到JSON
   json to_json() const {
-    return {
-      {"name", name},
-      {"downloadUrl", downloadUrl},
-      {"includePath", includePath},
-      {"libPath", libPath},
-      {"dependencies", dependencies},
-      {"configInstructions", configInstructions},
-      {"sha256", sha256}
-    };
+    return {{"name", name},
+            {"downloadUrl", downloadUrl},
+            {"includePath", includePath},
+            {"libPath", libPath},
+            {"dependencies", dependencies},
+            {"configInstructions", configInstructions},
+            {"sha256", sha256}};
   }
 };
 
@@ -139,7 +141,9 @@ namespace Constants {
 const std::string VERSION = "1.0.4";
 const std::string DEFAULT_PROJECT_NAME = "project";
 const std::string DEFAULT_LIBRARY_MIRROR = "libraries.json"; // 留空，由用户配置
-const std::string LIBRARY_INFO_FILENAME = "libraries.json";
+// Use a base filename without extension so code can try .json/.yaml/.yml
+// variants
+const std::string LIBRARY_INFO_FILENAME = "libraries";
 
 // 支持的编译器类型映射
 const std::unordered_map<std::string, CompilerType> COMPILER_TYPE_MAP = {
@@ -154,7 +158,7 @@ const std::unordered_map<std::string, DebuggerType> DEBUGGER_TYPE_MAP = {
     {"cppvsdbg", DebuggerType::CPPVSDBG}};
 } // namespace Constants
 
-// SHA256计算类（保持不变）
+// SHA256计算类
 class SHA256 {
 private:
   static constexpr std::array<uint32_t, 64> K = {
@@ -318,7 +322,34 @@ public:
   }
 };
 
-// 安全命令执行类（保持不变）
+#include <algorithm>
+#include <array>
+#include <cstdlib>
+#include <cstring>
+#include <filesystem>
+#include <iostream>
+#include <memory>
+#include <regex>
+#include <stdexcept>
+#include <string>
+#include <vector>
+
+#ifdef _WIN32
+#include <process.h>
+#include <shellapi.h>
+#include <tchar.h>
+#include <windows.h>
+#else
+#include <errno.h>
+#include <fcntl.h>
+#include <sys/stat.h>
+#include <sys/types.h>
+#include <sys/wait.h>
+#include <unistd.h>
+#endif
+
+namespace fs = std::filesystem;
+
 class SafeCommandExecutor {
 public:
   // 安全执行命令并获取输出
@@ -341,11 +372,8 @@ public:
     }
     std::cout << "Executing safe command: " << command_str << std::endl;
 
-    // Return the constructed command string (trim trailing space)
-    if (!command_str.empty()) {
-      command_str.pop_back(); // Remove the trailing space
-    }
-    return command_str;
+    // 实际执行命令
+    return execute_command(args);
   }
 
   // 安全下载文件
@@ -372,26 +400,84 @@ public:
       throw std::runtime_error("Failed to create output directory");
     }
 
+    // 检查curl是否可用
+    if (!is_command_available("curl")) {
+      throw std::runtime_error(
+          "curl command is not available. Please install curl first.");
+    }
+
+    // 构建curl命令
 #ifdef _WIN32
     std::vector<std::string> args = {"curl",
-                                     "-L", // 跟随重定向
-                                     "-o", output_path.string(), url};
+                                     "-L",           // 跟随重定向
+                                     "--silent",     // 静默模式
+                                     "--show-error", // 显示错误
+                                     "--retry",
+                                     "3",
+                                     "--max-time",
+                                     "300",
+                                     "--connect-timeout",
+                                     "30",
+                                     "--fail", // 返回错误如果HTTP错误
+                                     "-o",
+                                     output_path.string(),
+                                     url};
 #else
     std::vector<std::string> args = {"curl",
-                                     "-L", // 跟随重定向
-                                     "-o", output_path.string(), url};
+                                     "-L",           // 跟随重定向
+                                     "--silent",     // 静默模式
+                                     "--show-error", // 显示错误
+                                     "--retry",
+                                     "3",
+                                     "--max-time",
+                                     "300",
+                                     "--connect-timeout",
+                                     "30",
+                                     "--fail", // 返回错误如果HTTP错误
+                                     "-o",
+                                     output_path.string(),
+                                     url};
 #endif
 
     try {
+      // 执行curl命令
       std::string result = execute(args);
-      // 检查curl是否成功
-      if (result.find("curl:") != std::string::npos) {
-        std::cerr << "Curl error: " << result << std::endl;
-        return false;
+
+      // 检查文件是否成功下载
+      if (fs::exists(output_path)) {
+        std::error_code ec;
+        auto file_size = fs::file_size(output_path, ec);
+        if (!ec && file_size > 0) {
+          std::cout << "Download successful. File size: " << file_size
+                    << " bytes" << std::endl;
+          return true;
+        } else if (ec) {
+          std::cerr << "Failed to get file size: " << ec.message() << std::endl;
+        } else if (file_size == 0) {
+          std::cerr << "Downloaded file is empty" << std::endl;
+        }
+      } else {
+        std::cerr << "Downloaded file does not exist: " << output_path
+                  << std::endl;
       }
-      return true;
+
+      // 如果result包含错误信息，记录日志
+      if (!result.empty()) {
+        std::cerr << "Curl output: " << result << std::endl;
+      }
+      return false;
+
     } catch (const std::exception &e) {
       std::cerr << "Download failed: " << e.what() << std::endl;
+      // 清理可能已创建的部分文件
+      if (fs::exists(output_path)) {
+        std::error_code ec;
+        fs::remove(output_path, ec);
+        if (ec) {
+          std::cerr << "Failed to remove partial download: " << ec.message()
+                    << std::endl;
+        }
+      }
       return false;
     }
   }
@@ -404,8 +490,8 @@ public:
     }
 
     // 验证输出目录
-    if (!fs::exists(output_dir) || !fs::is_directory(output_dir)) {
-      throw std::invalid_argument("Invalid output directory: " +
+    if (!safe_create_directory(output_dir)) {
+      throw std::invalid_argument("Failed to create output directory: " +
                                   output_dir.string());
     }
 
@@ -416,17 +502,45 @@ public:
     }
 
 #ifdef _WIN32
+    // 检查powershell是否可用
+    if (!is_command_available("powershell")) {
+      throw std::runtime_error("powershell command is not available.");
+    }
+
     std::vector<std::string> args = {
-        "powershell",      "-Command",         "Expand-Archive",   "-Path",
-        zip_file.string(), "-DestinationPath", output_dir.string()};
+        "powershell",      "-Command",         "Expand-Archive",    "-Path",
+        zip_file.string(), "-DestinationPath", output_dir.string(), "-Force"};
 #else
+    // 检查unzip是否可用
+    if (!is_command_available("unzip")) {
+      throw std::runtime_error(
+          "unzip command is not available. Please install unzip first.");
+    }
+
     std::vector<std::string> args = {"unzip", "-o", zip_file.string(), "-d",
                                      output_dir.string()};
 #endif
 
     try {
       std::string result = execute(args);
-      return true;
+
+      // 检查解压后是否有文件
+      bool has_files = false;
+      for (const auto &entry : fs::directory_iterator(output_dir)) {
+        has_files = true;
+        break;
+      }
+
+      if (has_files) {
+        std::cout << "Unzip successful. Files extracted to: " << output_dir
+                  << std::endl;
+        return true;
+      } else {
+        std::cerr << "Unzip completed but no files found in output directory"
+                  << std::endl;
+        return false;
+      }
+
     } catch (const std::exception &e) {
       std::cerr << "Unzip failed: " << e.what() << std::endl;
       return false;
@@ -437,7 +551,14 @@ public:
   static bool safe_create_directory(const fs::path &path) {
     try {
       if (!fs::exists(path)) {
-        return fs::create_directories(path);
+        std::error_code ec;
+        bool created = fs::create_directories(path, ec);
+        if (!created || ec) {
+          std::cerr << "Failed to create directory " << path << ": "
+                    << ec.message() << std::endl;
+          return false;
+        }
+        std::cout << "Created directory: " << path << std::endl;
       }
       return true;
     } catch (const fs::filesystem_error &e) {
@@ -446,7 +567,6 @@ public:
     }
   }
 
-public:
   // 验证URL格式
   static bool is_valid_url(const std::string &url) {
     // 更简单但更健壮的URL验证
@@ -483,15 +603,22 @@ public:
 
       // 其他URL需要更严格的检查
       static const std::regex domain_regex(
-          R"([a-zA-Z0-9][a-zA-Z0-9-]{1,61}[a-zA-Z0-9]\.[a-zA-Z]{2,})");
+          R"(^(?:[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}$)");
 
       // 提取域名部分
       size_t start = url.find("://") + 3;
       size_t end = url.find('/', start);
-      if (end == std::string::npos)
+      if (end == std::string::npos) {
         end = url.length();
+      }
 
       std::string domain = url.substr(start, end - start);
+
+      // 移除端口号
+      size_t port_pos = domain.find(':');
+      if (port_pos != std::string::npos) {
+        domain = domain.substr(0, port_pos);
+      }
 
       // 验证域名格式
       return std::regex_match(domain, domain_regex);
@@ -502,138 +629,197 @@ public:
   }
 
 private:
-  // POSIX命令执行
-  static std::string execute_posix(const std::vector<std::string> &args) {
+  // 检查命令是否可用
+  static bool is_command_available(const std::string &command) {
 #ifdef _WIN32
-    // Windows版本使用_popen
-    std::string command;
-    for (const auto &arg : args) {
-      if (!command.empty())
-        command += " ";
-      command += arg;
+    std::string check_cmd = "where " + command + " >nul 2>nul";
+    int result = std::system(check_cmd.c_str());
+    return result == 0;
+#else
+    std::string check_cmd = "which " + command + " >/dev/null 2>&1";
+    int result = std::system(check_cmd.c_str());
+    return result == 0;
+#endif
+  }
+
+  // 实际执行命令的实现
+  static std::string execute_command(const std::vector<std::string> &args) {
+#ifdef _WIN32
+    return execute_windows(args);
+#else
+    return execute_posix(args);
+#endif
+  }
+
+  static std::string execute_windows(const std::vector<std::string> &args) {
+    if (args.empty()) {
+      throw std::invalid_argument("No command to execute");
     }
+
+    std::string command_line;
+    for (size_t i = 0; i < args.size(); ++i) {
+      if (i > 0)
+        command_line += " ";
+
+      if (args[i].find(' ') != std::string::npos ||
+          args[i].find('\t') != std::string::npos) {
+        command_line += "\"" + args[i] + "\"";
+      } else {
+        command_line += args[i];
+      }
+    }
+
+    command_line += " 2>&1";
 
     std::array<char, 128> buffer;
     std::string result;
-    std::unique_ptr<FILE, decltype(&_pclose)> pipe(_popen(command.c_str(), "r"),
-                                                   _pclose);
+    FILE *pipe = popen(command_line.c_str(), "r");
 
     if (!pipe) {
-      throw std::runtime_error("_popen() failed!");
+      throw std::runtime_error("popen() failed!");
     }
 
-    while (fgets(buffer.data(), buffer.size(), pipe.get()) != nullptr) {
-      result += buffer.data();
+    try {
+      while (fgets(buffer.data(), static_cast<int>(buffer.size()), pipe) !=
+             nullptr) {
+        result += buffer.data();
+      }
+    } catch (...) {
+      pclose(pipe);
+      throw;
+    }
+
+    int return_code = pclose(pipe);
+
+    if (return_code != 0) {
+      throw std::runtime_error(
+          "Command failed with exit code: " + std::to_string(return_code) +
+          "\nOutput: " + result);
     }
 
     return result;
-#else
-    // 原有的POSIX实现
-    // 准备参数数组
+  }
+
+  static std::string execute_posix(const std::vector<std::string> &args) {
+    if (args.empty()) {
+      throw std::invalid_argument("No command to execute");
+    }
+
     std::vector<char *> argv;
     for (const auto &arg : args) {
       argv.push_back(const_cast<char *>(arg.c_str()));
     }
     argv.push_back(nullptr);
 
-    // 创建管道
     int pipefd[2];
     if (pipe(pipefd) == -1) {
-      throw std::runtime_error("Failed to create pipe");
+      throw std::runtime_error("Failed to create pipe: " +
+                               std::string(strerror(errno)));
     }
 
     pid_t pid = fork();
     if (pid == -1) {
       close(pipefd[0]);
       close(pipefd[1]);
-      throw std::runtime_error("Failed to fork process");
+      throw std::runtime_error("Failed to fork process: " +
+                               std::string(strerror(errno)));
     }
 
-    if (pid == 0) { // 子进程
+    if (pid == 0) { 
       // 关闭读端
       close(pipefd[0]);
 
-      // 重定向标准输出到管道
       if (dup2(pipefd[1], STDOUT_FILENO) == -1) {
-        perror("dup2");
+        perror("dup2 stdout");
         exit(EXIT_FAILURE);
       }
+
+      if (dup2(pipefd[1], STDERR_FILENO) == -1) {
+        perror("dup2 stderr");
+        exit(EXIT_FAILURE);
+      }
+
       close(pipefd[1]);
 
-      // 降低权限（仅在Unix系统上）
       if (setgid(getgid()) != 0 || setuid(getuid()) != 0) {
         perror("setgid/setuid");
         exit(EXIT_FAILURE);
       }
 
-      // 执行命令
       execvp(argv[0], argv.data());
-      perror("execvp");
+
+      std::cerr << "Failed to execute command: " << argv[0] << " - "
+                << strerror(errno) << std::endl;
       exit(EXIT_FAILURE);
     }
 
-    // 父进程
-    close(pipefd[1]); // 关闭写端
+    close(pipefd[1]);
 
     std::string result;
-    char buffer[128];
+    char buffer[4096];
     ssize_t count;
 
-    while ((count = read(pipefd[0], buffer, sizeof(buffer)))) {
-      if (count == -1) {
-        if (errno == EINTR)
-          continue;
-        perror("read");
-        break;
-      }
+    while ((count = read(pipefd[0], buffer, sizeof(buffer) - 1)) > 0) {
+      buffer[count] = '\0';
       result.append(buffer, count);
+    }
+
+    if (count == -1 && errno != EINTR) {
+      close(pipefd[0]);
+      throw std::runtime_error("Error reading from pipe: " +
+                               std::string(strerror(errno)));
     }
 
     close(pipefd[0]);
 
     // 等待子进程结束
     int status;
-    waitpid(pid, &status, 0);
+    do {
+      if (waitpid(pid, &status, 0) == -1) {
+        if (errno == EINTR)
+          continue;
+        throw std::runtime_error("waitpid failed: " +
+                                 std::string(strerror(errno)));
+      }
+    } while (!WIFEXITED(status) && !WIFSIGNALED(status));
 
     if (WIFEXITED(status) && WEXITSTATUS(status) != 0) {
       throw std::runtime_error("Command exited with non-zero status: " +
-                               std::to_string(WEXITSTATUS(status)));
+                               std::to_string(WEXITSTATUS(status)) +
+                               "\nOutput: " + result);
+    }
+
+    if (WIFSIGNALED(status)) {
+      throw std::runtime_error("Command terminated by signal: " +
+                               std::to_string(WTERMSIG(status)));
     }
 
     return result;
-#endif
-  }
-
-  // Windows参数转义
-  static std::string escape_windows_arg(const std::string &arg) {
-    std::string escaped;
-    for (char c : arg) {
-      if (c == '"') {
-        escaped += "\\\"";
-      } else if (c == '\\') {
-        escaped += "\\\\";
-      } else {
-        escaped += c;
-      }
-    }
-    return escaped;
   }
 
   // 验证参数安全性
   static bool is_safe_argument(const std::string &arg) {
-    // 禁止命令分隔符
-    if (arg.find(';') != std::string::npos ||
-        arg.find('|') != std::string::npos ||
-        arg.find('&') != std::string::npos ||
-        arg.find('$') != std::string::npos ||
-        arg.find('`') != std::string::npos ||
-        arg.find('>') != std::string::npos ||
-        arg.find('<') != std::string::npos) {
+    // 检查空参数
+    if (arg.empty()) {
       return false;
+    }
+
+    // 禁止命令分隔符
+    const std::string dangerous_chars = ";&|`$><!*?{}[]()";
+    for (char c : dangerous_chars) {
+      if (arg.find(c) != std::string::npos) {
+        return false;
+      }
     }
 
     // 禁止目录遍历
     if (arg.find("..") != std::string::npos) {
+      return false;
+    }
+
+    // 检查是否包含换行符
+    if (arg.find('\n') != std::string::npos ||
+        arg.find('\r') != std::string::npos) {
       return false;
     }
 
@@ -684,13 +870,145 @@ public:
     return name;
   }
 
-  // 检查编译器是否支持指定标准
-  static bool is_standard_supported(const CompilerConfig &compiler,
-                                    const std::string &standard) {
-    // 简化实现：实际项目中应调用编译器获取支持的标准列表
-    return true;
-  }
+static bool is_standard_supported(const CompilerConfig& compiler,
+                                        const std::string& standard) {
+    static std::mutex cache_mutex;
+    static std::map<std::tuple<CompilerType, std::string, int, int, int>, bool> cache;
+    
+    if (compiler.type == CompilerType::UNKNOWN) {
+        return true;
+    }
+    
+    std::string s = standard;
+    std::transform(s.begin(), s.end(), s.begin(), [](unsigned char c) { return std::tolower(c); });
+    
+    if (s == "c++latest" || s == "clatest") {
+        return true;
+    }
+    
+    try {
+        auto probe = [&compiler]() -> std::tuple<int, int, int> {
+            std::string exe = !compiler.path.empty() ? compiler.path : compiler.name;
+            if (exe.empty()) return {-1, -1, -1};
+            
+            std::vector<std::vector<std::string>> cmds = {
+                {exe, "--version"}, {exe, "-v"}, {exe, "-dumpversion"}, {exe}
+            };
+            
+            for (auto& cmd : cmds) {
+                try {
+                    std::string out = Utils::safe_execute_command(cmd);
+                    if (out.empty()) continue;
+                    
+                    std::regex ver_re(R"((\d+)\.(\d+)(?:\.(\d+))?)");
+                    std::smatch m;
+                    if (std::regex_search(out, m, ver_re)) {
+                        int major = std::stoi(m[1].str());
+                        int minor = std::stoi(m[2].str());
+                        int patch = 0;
+                        if (m.size() > 3 && m[3].matched) patch = std::stoi(m[3].str());
+                        return {major, minor, patch};
+                    }
+                } catch (...) {}
+            }
+            return {-1, -1, -1};
+        };
 
+        auto [maj, min, pat] = probe();
+        
+        if (maj < 0) return true;
+        
+        auto cache_key = std::make_tuple(compiler.type, s, maj, min, pat);
+        {
+            std::lock_guard<std::mutex> lock(cache_mutex);
+            auto it = cache.find(cache_key);
+            if (it != cache.end()) {
+                return it->second;
+            }
+        }
+        
+        auto at_least = [&](int M, int m = 0) {
+            if (maj > M) return true;
+            if (maj < M) return false;
+            return min >= m;
+        };
+
+        bool supported = true;
+        
+        if (s.rfind("c++", 0) == 0) {
+            if (s == "c++98" || s == "c++03") supported = true;
+            else if (s == "c++11") {
+                if (compiler.type == CompilerType::GCC || compiler.type == CompilerType::GXX)
+                    supported = (maj > 4) || (maj == 4 && min >= 8);
+                else if (compiler.type == CompilerType::CLANG || compiler.type == CompilerType::CLANGXX)
+                    supported = at_least(3, 3);
+                else if (compiler.type == CompilerType::MSVC)
+                    supported = maj >= 19;
+            }
+            else if (s == "c++14") {
+                if (compiler.type == CompilerType::GCC || compiler.type == CompilerType::GXX)
+                    supported = at_least(5, 0);
+                else if (compiler.type == CompilerType::CLANG || compiler.type == CompilerType::CLANGXX)
+                    supported = at_least(3, 4);
+                else if (compiler.type == CompilerType::MSVC)
+                    supported = maj >= 19;
+            }
+            else if (s == "c++17") {
+                if (compiler.type == CompilerType::GCC || compiler.type == CompilerType::GXX)
+                    supported = at_least(7, 0);
+                else if (compiler.type == CompilerType::CLANG || compiler.type == CompilerType::CLANGXX)
+                    supported = at_least(5, 0);
+                else if (compiler.type == CompilerType::MSVC)
+                    supported = (maj == 19 && min >= 10) || (maj > 19);
+            }
+            else if (s == "c++20") {
+                if (compiler.type == CompilerType::GCC || compiler.type == CompilerType::GXX)
+                    supported = at_least(10, 0);
+                else if (compiler.type == CompilerType::CLANG || compiler.type == CompilerType::CLANGXX)
+                    supported = at_least(11, 0);
+                else if (compiler.type == CompilerType::MSVC)
+                    supported = (maj == 19 && min >= 25) || (maj > 19);
+            }
+            else if (s == "c++23") {
+                if (compiler.type == CompilerType::GCC || compiler.type == CompilerType::GXX)
+                    supported = at_least(12, 0);
+                else if (compiler.type == CompilerType::CLANG || compiler.type == CompilerType::CLANGXX)
+                    supported = at_least(13, 0);
+                else if (compiler.type == CompilerType::MSVC)
+                    supported = (maj == 19 && min >= 30) || (maj > 19);
+            }
+        } else if (s.rfind("c", 0) == 0) {
+            if (s == "c99") supported = true;
+            else if (s == "c11") {
+                if (compiler.type == CompilerType::GCC || compiler.type == CompilerType::GXX)
+                    supported = at_least(5, 0);
+                else if (compiler.type == CompilerType::CLANG || compiler.type == CompilerType::CLANGXX)
+                    supported = at_least(3, 4);
+                else if (compiler.type == CompilerType::MSVC)
+                    supported = maj >= 19;
+            }
+            else if (s == "c17" || s == "c18") supported = true;
+            else if (s == "c20" || s == "c23") {
+                if (compiler.type == CompilerType::GCC || compiler.type == CompilerType::GXX)
+                    supported = at_least(11, 0);
+                else if (compiler.type == CompilerType::CLANG || compiler.type == CompilerType::CLANGXX)
+                    supported = at_least(11, 0);
+                else if (compiler.type == CompilerType::MSVC)
+                    supported = (maj == 19 && min >= 30) || (maj > 19);
+            }
+        }
+
+        {
+            std::lock_guard<std::mutex> lock(cache_mutex);
+            cache[cache_key] = supported;
+        }
+        
+        return supported;
+        
+    } catch (...) {
+        return true;
+    }
+}
   // 安全执行系统命令
   static int execute_command(const std::string &command) {
     std::cout << "Executing: " << command << std::endl;
@@ -804,7 +1122,6 @@ public:
     }
   }
 };
-
 // 库信息提供者接口
 class ILibraryInfoProvider {
 public:
@@ -825,6 +1142,143 @@ public:
 
   // 获取库信息文件路径
   virtual fs::path get_library_info_path() const = 0;
+};
+
+// A simplified multi-format provider that currently supports JSON and offers
+// clear errors when YAML is encountered.
+class MultiFormatLibraryProvider : public ILibraryInfoProvider {
+private:
+  fs::path library_info_path_;
+  std::string download_url_;
+  std::unordered_map<std::string, ThirdPartyLibrary> libraries_;
+  mutable std::mutex cache_mutex_;
+
+public:
+  MultiFormatLibraryProvider(const fs::path &info_path,
+                             const std::string &url = "")
+      : library_info_path_(info_path), download_url_(url) {
+    // Attempt to load on construction; failure will be reported but won't
+    // throw.
+    refresh_library_info();
+  }
+
+  std::vector<std::string> get_available_libraries() override {
+    std::lock_guard<std::mutex> lock(cache_mutex_);
+    std::vector<std::string> libs;
+    for (const auto &pair : libraries_) {
+      libs.push_back(pair.first);
+    }
+    return libs;
+  }
+
+  std::optional<ThirdPartyLibrary>
+  get_library_info(const std::string &lib_name) override {
+    std::lock_guard<std::mutex> lock(cache_mutex_);
+    auto it = libraries_.find(lib_name);
+    if (it != libraries_.end()) {
+      return it->second;
+    }
+    return std::nullopt;
+  }
+
+  bool refresh_library_info() override {
+    std::lock_guard<std::mutex> lock(cache_mutex_);
+
+    // If the file doesn't exist and a download URL is provided, try to
+    // download.
+    if (!fs::exists(library_info_path_)) {
+      if (!download_url_.empty()) {
+        if (!download_library_info()) {
+          std::cerr << "Failed to download library info from: " << download_url_
+                    << std::endl;
+          return false;
+        }
+      } else {
+        std::cout
+            << "Library info file not found and no download URL provided.\n";
+        return false;
+      }
+    }
+
+    // Decide parsing by extension. For this simplified build we only support
+    // JSON.
+    std::string extension = library_info_path_.extension().string();
+    std::transform(extension.begin(), extension.end(), extension.begin(),
+                   ::tolower);
+
+    if (extension == ".yaml" || extension == ".yml") {
+      std::cerr << "YAML library files are not supported in this build. Please "
+                   "provide JSON formatted library info.\n";
+      return false;
+    }
+
+    json j = Utils::read_json_file(library_info_path_);
+    if (j.is_null() || !j.is_object()) {
+      std::cerr << "Invalid library info JSON file: " << library_info_path_
+                << std::endl;
+      return false;
+    }
+
+    libraries_.clear();
+    for (auto it = j.begin(); it != j.end(); ++it) {
+      try {
+        ThirdPartyLibrary lib = ThirdPartyLibrary::from_json(it.value());
+        libraries_[it.key()] = lib;
+      } catch (const std::exception &e) {
+        std::cerr << "Error parsing library info for " << it.key() << ": "
+                  << e.what() << std::endl;
+      }
+    }
+
+    std::cout << "Loaded " << libraries_.size()
+              << " libraries from: " << library_info_path_ << std::endl;
+    return true;
+  }
+
+  std::string get_provider_name() const override {
+    return "Multi-Format Library Provider (" + library_info_path_.string() +
+           ")";
+  }
+
+  fs::path get_library_info_path() const override { return library_info_path_; }
+
+private:
+  bool download_library_info() {
+    std::cout << "Downloading library info from: " << download_url_
+              << std::endl;
+
+    fs::path temp_path = library_info_path_;
+    temp_path.replace_extension(".tmp");
+
+    if (!SafeCommandExecutor::download_file(download_url_, temp_path)) {
+      return false;
+    }
+
+    // Verify JSON validity (YAML not supported in this simplified provider)
+    json j = Utils::read_json_file(temp_path);
+    if (j.is_null() || !j.is_object()) {
+      try {
+        fs::remove(temp_path);
+      } catch (...) {
+      }
+      std::cerr << "Downloaded file is not valid JSON" << std::endl;
+      return false;
+    }
+
+    try {
+      if (fs::exists(library_info_path_)) {
+        fs::remove(library_info_path_);
+      }
+      fs::rename(temp_path, library_info_path_);
+    } catch (const fs::filesystem_error &e) {
+      std::cerr << "Error moving library info file: " << e.what() << std::endl;
+      return false;
+    }
+
+    std::cout << "Library info downloaded successfully to: "
+              << library_info_path_ << std::endl;
+    return true;
+  }
 };
 
 // JSON库信息提供者
@@ -862,17 +1316,18 @@ public:
 
   bool refresh_library_info() override {
     std::lock_guard<std::mutex> lock(cache_mutex_);
-    
+
     // 如果文件不存在且提供了下载URL，则尝试下载
     if (!fs::exists(library_info_path_)) {
       if (!download_url_.empty()) {
         if (!download_library_info()) {
-          std::cerr << "Failed to download library info from: " 
-                    << download_url_ << std::endl;
+          std::cerr << "Failed to download library info from: " << download_url_
+                    << std::endl;
           return false;
         }
       } else {
-        std::cout << "Library info file not found and no download URL provided.\n";
+        std::cout
+            << "Library info file not found and no download URL provided.\n";
         return false;
       }
     }
@@ -880,8 +1335,8 @@ public:
     // 读取并解析JSON文件
     json j = Utils::read_json_file(library_info_path_);
     if (j.is_null() || !j.is_object()) {
-      std::cerr << "Invalid library info JSON file: " 
-                << library_info_path_ << std::endl;
+      std::cerr << "Invalid library info JSON file: " << library_info_path_
+                << std::endl;
       return false;
     }
 
@@ -891,12 +1346,12 @@ public:
         ThirdPartyLibrary lib = ThirdPartyLibrary::from_json(it.value());
         libraries_[it.key()] = lib;
       } catch (const std::exception &e) {
-        std::cerr << "Error parsing library info for " << it.key() 
-                  << ": " << e.what() << std::endl;
+        std::cerr << "Error parsing library info for " << it.key() << ": "
+                  << e.what() << std::endl;
       }
     }
 
-    std::cout << "Loaded " << libraries_.size() 
+    std::cout << "Loaded " << libraries_.size()
               << " libraries from: " << library_info_path_ << std::endl;
     return true;
   }
@@ -905,17 +1360,16 @@ public:
     return "JSON Library Provider (" + library_info_path_.string() + ")";
   }
 
-  fs::path get_library_info_path() const override {
-    return library_info_path_;
-  }
+  fs::path get_library_info_path() const override { return library_info_path_; }
 
 private:
   bool download_library_info() {
-    std::cout << "Downloading library info from: " << download_url_ << std::endl;
-    
+    std::cout << "Downloading library info from: " << download_url_
+              << std::endl;
+
     fs::path temp_path = library_info_path_;
     temp_path.replace_extension(".tmp");
-    
+
     if (!SafeCommandExecutor::download_file(download_url_, temp_path)) {
       return false;
     }
@@ -939,7 +1393,7 @@ private:
       return false;
     }
 
-    std::cout << "Library info downloaded successfully to: " 
+    std::cout << "Library info downloaded successfully to: "
               << library_info_path_ << std::endl;
     return true;
   }
@@ -1339,7 +1793,7 @@ private:
   }
 };
 
-// 项目结构服务（保持不变）
+// 项目结构服务
 class ProjectStructureService {
 public:
   // 生成项目结构定义
@@ -1474,107 +1928,60 @@ private:
     }
   }
 };
-
-// 初始化静态成员变量
 #ifdef _WIN32
 bool ProjectStructureService::use_unicode_symbols = false;
 #else
 bool ProjectStructureService::use_unicode_symbols = true;
 #endif
-// 库服务（修改为使用JsonLibraryProvider）
 class LibraryService {
 private:
   static std::unique_ptr<ILibraryInfoProvider> provider_;
 
-  // 创建第三方库目录
-  static void create_third_party_dir(const fs::path &project_path) {
-    const fs::path third_party_dir = project_path / "third_party";
-    Utils::safe_create_directory(third_party_dir);
-  }
+  // 修改获取默认库信息文件路径的方法
+  static fs::path get_default_library_info_path() {
+    // 优先检查多种格式的文件
+    std::vector<std::string> extensions = {".json", ".yaml", ".yml"};
 
-  // 生成库使用指南
-  static void generate_library_guide(const fs::path &project_path,
-                                     const ThirdPartyLibrary &lib) {
-    const fs::path docs_dir = project_path / "docs";
-    Utils::safe_create_directory(docs_dir);
-
-    const fs::path guide_path = docs_dir / (lib.name + "_GUIDE.md");
-
-    std::string content = "# " + lib.name + " Integration Guide\n\n";
-    content += "## Installation\n";
-    content += "The library has been downloaded to: `third_party/" +
-               fs::path(lib.downloadUrl).stem().string() + "`\n\n";
-    content += "## Configuration\n";
-    content += "### CMake Configuration\n";
-    content += "```cmake\n" + lib.configInstructions + "\n```\n\n";
-    content += "### Include in Code\n";
-
-    if (lib.name == "GLFW") {
-      content += "```cpp\n#include <GLFW/glfw3.h>\n```\n\n";
-    } else if (lib.name == "Boost") {
-      content += "```cpp\n#include <boost/filesystem.hpp>\n```\n\n";
-    } else if (lib.name == "SDL2") {
-      content += "```cpp\n#include <SDL.h>\n```\n\n";
-    } else {
-      content += "```cpp\n#include <" + lib.name + ".h>\n```\n\n";
+    // 首先尝试当前目录
+    for (const auto &ext : extensions) {
+      fs::path local_path =
+          fs::current_path() / (Constants::LIBRARY_INFO_FILENAME + ext);
+      if (fs::exists(local_path)) {
+        return local_path;
+      }
     }
 
-    content += "## Official Documentation\n";
-    if (lib.name == "GLFW") {
-      content += "- [GLFW Documentation](https://www.glfw.org/docs/latest/)\n";
-    } else if (lib.name == "Boost") {
-      content += "- [Boost Documentation](https://www.boost.org/doc/libs/)\n";
-    } else if (lib.name == "SDL2") {
-      content += "- [SDL2 Documentation](https://wiki.libsdl.org/)\n";
-    } else {
-      content += "- Check the official website for " + lib.name + "\n";
+    // 然后尝试用户主目录
+    const char *home_dir = std::getenv("HOME");
+    if (home_dir) {
+      for (const auto &ext : extensions) {
+        fs::path home_path = fs::path(home_dir) / ".sln2code" /
+                             (Constants::LIBRARY_INFO_FILENAME + ext);
+        if (fs::exists(home_path)) {
+          return home_path;
+        }
+      }
     }
 
-    Utils::safe_write_file(guide_path, content);
+    // 最后返回默认的JSON路径（即使文件不存在）
+    return fs::current_path() / (Constants::LIBRARY_INFO_FILENAME + ".json");
   }
 
-  // 获取当前提供者
-  static ILibraryInfoProvider& get_provider() {
+  // 修改获取提供者的方法
+  static ILibraryInfoProvider &get_provider() {
     if (!provider_) {
-      // 默认使用本地JSON文件提供者
+      // 使用多格式提供者
       fs::path local_info_path = get_default_library_info_path();
-      provider_ = std::make_unique<JsonLibraryProvider>(local_info_path);
+      provider_ = std::make_unique<MultiFormatLibraryProvider>(local_info_path);
     }
     return *provider_;
   }
 
-  // 获取默认库信息文件路径
-  static fs::path get_default_library_info_path() {
-    // 首先尝试当前目录
-    fs::path local_path = fs::current_path() / Constants::LIBRARY_INFO_FILENAME;
-    if (fs::exists(local_path)) {
-      return local_path;
-    }
-    
-    // 然后尝试用户主目录
-    const char* home_dir = std::getenv("HOME");
-    if (home_dir) {
-      fs::path home_path = fs::path(home_dir) / ".sln2code" / Constants::LIBRARY_INFO_FILENAME;
-      if (fs::exists(home_path)) {
-        return home_path;
-      }
-    }
-    
-    // 最后返回当前目录的路径（即使文件不存在）
-    return local_path;
-  }
-
 public:
-  // 设置库信息提供者
-  static void set_provider(std::unique_ptr<ILibraryInfoProvider> provider) {
-    provider_ = std::move(provider);
-  }
-
-  // 配置库镜像URL
-  static bool configure_library_mirror(const std::string& mirror_url) {
+  // 修改配置库镜像URL的方法
+  static bool configure_library_mirror(const std::string &mirror_url) {
     if (mirror_url.empty()) {
       std::cout << "Clearing library mirror configuration.\n";
-      // 重置为本地提供者
       provider_.reset();
       return true;
     }
@@ -1586,24 +1993,95 @@ public:
     }
 
     std::cout << "Configuring library mirror: " << mirror_url << std::endl;
-    
+
     // 创建远程提供者
-    fs::path local_cache = fs::temp_directory_path() / "sln2code_libraries.json";
-    auto remote_provider = std::make_unique<JsonLibraryProvider>(local_cache, mirror_url);
-    
+    fs::path local_cache =
+        fs::temp_directory_path() / "sln2code_libraries.json";
+    auto remote_provider =
+        std::make_unique<MultiFormatLibraryProvider>(local_cache, mirror_url);
+
     // 测试连接
     if (!remote_provider->refresh_library_info()) {
-      std::cerr << "Failed to connect to library mirror: " << mirror_url << std::endl;
+      std::cerr << "Failed to connect to library mirror: " << mirror_url
+                << std::endl;
       return false;
     }
 
     provider_ = std::move(remote_provider);
-    std::cout << "Library mirror configured successfully. Found " 
+    std::cout << "Library mirror configured successfully. Found "
               << provider_->get_available_libraries().size() << " libraries.\n";
     return true;
   }
 
-  // 提供库安装选项
+  // 新增：自动检测并加载库信息文件
+  static bool auto_detect_library_info() {
+    fs::path detected_path = find_library_info_file();
+    if (detected_path.empty()) {
+      std::cout << "No library info file found in common locations.\n";
+      return false;
+    }
+
+    std::cout << "Detected library info file: " << detected_path << std::endl;
+    provider_ = std::make_unique<MultiFormatLibraryProvider>(detected_path);
+    return provider_->refresh_library_info();
+  }
+
+  // 新增：查找库信息文件
+  static fs::path find_library_info_file() {
+    std::vector<std::string> filenames = {
+        Constants::LIBRARY_INFO_FILENAME + ".json",
+        Constants::LIBRARY_INFO_FILENAME + ".yaml",
+        Constants::LIBRARY_INFO_FILENAME + ".yml",
+        "libraries.json",
+        "libraries.yaml",
+        "libraries.yml"};
+
+    // 检查当前目录
+    for (const auto &filename : filenames) {
+      fs::path path = fs::current_path() / filename;
+      if (fs::exists(path)) {
+        return path;
+      }
+    }
+
+    // 检查用户主目录
+    const char *home_dir = std::getenv("HOME");
+    if (home_dir) {
+      fs::path home_path = fs::path(home_dir) / ".sln2code";
+      for (const auto &filename : filenames) {
+        fs::path path = home_path / filename;
+        if (fs::exists(path)) {
+          return path;
+        }
+      }
+    }
+
+    return fs::path();
+  }
+
+  // 新增：手动设置库信息文件路径
+  static bool set_library_info_path(const fs::path &path) {
+    if (!fs::exists(path)) {
+      std::cerr << "Library info file not found: " << path << std::endl;
+      return false;
+    }
+
+    std::string extension = path.extension().string();
+    std::transform(extension.begin(), extension.end(), extension.begin(),
+                   ::tolower);
+
+    std::vector<std::string> supported_formats = {".json", ".yaml", ".yml"};
+    if (std::find(supported_formats.begin(), supported_formats.end(),
+                  extension) == supported_formats.end()) {
+      std::cerr << "Unsupported file format: " << extension << std::endl;
+      return false;
+    }
+
+    provider_ = std::make_unique<MultiFormatLibraryProvider>(path);
+    return provider_->refresh_library_info();
+  }
+
+  // 原有的库安装方法保持不变，但需要更新以使用新的提供者接口
   static void offer_library_installation(const fs::path &project_path) {
     std::cout << "\nWould you like to add any third-party libraries? [y/N]: ";
     std::string response;
@@ -1618,24 +2096,25 @@ public:
 
     if (available_libs.empty()) {
       std::cout << "No libraries available from the current provider.\n";
-      
+
       // 提供配置镜像的选项
       std::cout << "Would you like to configure a library mirror? [y/N]: ";
       std::string mirror_response;
       std::getline(std::cin, mirror_response);
-      
-      if (!mirror_response.empty() && (mirror_response[0] == 'y' || mirror_response[0] == 'Y')) {
+
+      if (!mirror_response.empty() &&
+          (mirror_response[0] == 'y' || mirror_response[0] == 'Y')) {
         std::cout << "Enter library mirror URL (or press Enter to skip): ";
         std::string mirror_url;
         std::getline(std::cin, mirror_url);
-        
+
         if (!mirror_url.empty()) {
           configure_library_mirror(mirror_url);
           // 重新获取可用库
           available_libs = provider.get_available_libraries();
         }
       }
-      
+
       if (available_libs.empty()) {
         return;
       }
@@ -1647,14 +2126,15 @@ public:
     }
 
     while (true) {
-      std::cout << "\nEnter library name or number (or 'done' to finish, 'list' to show available): ";
+      std::cout << "\nEnter library name or number (or 'done' to finish, "
+                   "'list' to show available): ";
       std::string lib_input;
       std::getline(std::cin, lib_input);
 
       if (lib_input == "done") {
         break;
       }
-      
+
       if (lib_input == "list") {
         std::cout << "Available libraries:\n";
         for (size_t i = 0; i < available_libs.size(); ++i) {
@@ -1680,67 +2160,9 @@ public:
     }
   }
 
-  // 下载并解压库文件
-  static bool download_and_extract_library(const fs::path &project_path,
-                                         const ThirdPartyLibrary &lib) {
-    const fs::path third_party_dir = project_path / "third_party";
-    const fs::path zip_file = third_party_dir / (lib.name + ".zip");
-
-    std::cout << "\nDownloading " << lib.name << " from " << lib.downloadUrl << "...\n";
-
-    // 下载文件
-    if (!SafeCommandExecutor::download_file(lib.downloadUrl, zip_file)) {
-      std::cerr << "Failed to download " << lib.name << std::endl;
-      return false;
-    }
-
-    // 验证SHA256（如果提供了）
-    if (!lib.sha256.empty()) {
-      std::cout << "Verifying SHA256 checksum...\n";
-      try {
-        std::string calculated_sha = SHA256::hash_file(zip_file);
-        if (calculated_sha != lib.sha256) {
-          std::cerr << "SHA256 verification failed!\n";
-          std::cerr << "Expected: " << lib.sha256 << "\n";
-          std::cerr << "Actual:   " << calculated_sha << "\n";
-          fs::remove(zip_file);
-          return false;
-        }
-        std::cout << "SHA256 verification passed.\n";
-      } catch (const std::exception &e) {
-        std::cerr << "Error during SHA256 calculation: " << e.what() << std::endl;
-        fs::remove(zip_file);
-        return false;
-      }
-    }
-
-    std::cout << "Extracting " << lib.name << "...\n";
-
-    // 解压文件
-    if (!SafeCommandExecutor::unzip_file(zip_file, third_party_dir)) {
-      std::cerr << "Failed to extract " << lib.name << std::endl;
-      return false;
-    }
-
-    // 删除压缩包（异步执行）
-    std::thread([zip_file]() {
-      std::this_thread::sleep_for(std::chrono::seconds(1)); // 稍等确保解压完成
-      try {
-        if (fs::exists(zip_file)) {
-          fs::remove(zip_file);
-          std::cout << "Cleaned up temporary zip file.\n";
-        }
-      } catch (const std::exception &e) {
-        std::cerr << "Error removing zip file: " << e.what() << std::endl;
-      }
-    }).detach();
-
-    return true;
-  }
-
-  // 添加第三方库到项目
+  // 原有的库安装方法保持不变
   static bool add_third_party_library(const fs::path &project_path,
-                                     const std::string &lib_name) {
+                                      const std::string &lib_name) {
     static std::set<std::string> installed_libs;
     static std::mutex mtx;
 
@@ -1753,20 +2175,23 @@ public:
       installed_libs.insert(lib_name);
     }
 
-    create_third_party_dir(project_path);
+    // 创建第三方库目录
+    const fs::path third_party_dir = project_path / "third_party";
+    Utils::safe_create_directory(third_party_dir);
 
     auto &provider = get_provider();
     auto lib_info = provider.get_library_info(lib_name);
 
     if (!lib_info) {
       std::cerr << "Library not found: " << lib_name << std::endl;
-      
+
       // 显示可用库列表
       auto available_libs = provider.get_available_libraries();
       if (!available_libs.empty()) {
         std::cout << "Available libraries: ";
         for (size_t i = 0; i < available_libs.size(); ++i) {
-          if (i > 0) std::cout << ", ";
+          if (i > 0)
+            std::cout << ", ";
           std::cout << available_libs[i];
         }
         std::cout << "\n";
@@ -1783,7 +2208,8 @@ public:
     } else {
       // 下载并解压库
       if (!download_and_extract_library(project_path, *lib_info)) {
-        std::cerr << "Failed to download and extract " << lib_info->name << std::endl;
+        std::cerr << "Failed to download and extract " << lib_info->name
+                  << std::endl;
         return false;
       }
     }
@@ -1813,13 +2239,114 @@ public:
     std::cout << lib_info->name << " added successfully!\n";
     std::cout << "See docs/" << lib_info->name
               << "_GUIDE.md for usage instructions\n";
-    
+
     return true;
   }
 
-  // 更新CMakeLists.txt以包含库
+  // 原有的下载和解压方法保持不变
+  static bool download_and_extract_library(const fs::path &project_path,
+                                           const ThirdPartyLibrary &lib) {
+    const fs::path third_party_dir = project_path / "third_party";
+    const fs::path zip_file = third_party_dir / (lib.name + ".zip");
+
+    std::cout << "\nDownloading " << lib.name << " from " << lib.downloadUrl
+              << "...\n";
+
+    // 下载文件
+    if (!SafeCommandExecutor::download_file(lib.downloadUrl, zip_file)) {
+      std::cerr << "Failed to download " << lib.name << std::endl;
+      return false;
+    }
+
+    // 验证SHA256（如果提供了）
+    if (!lib.sha256.empty()) {
+      std::cout << "Verifying SHA256 checksum...\n";
+      try {
+        std::string calculated_sha = SHA256::hash_file(zip_file);
+        if (calculated_sha != lib.sha256) {
+          std::cerr << "SHA256 verification failed!\n";
+          std::cerr << "Expected: " << lib.sha256 << "\n";
+          std::cerr << "Actual:   " << calculated_sha << "\n";
+          fs::remove(zip_file);
+          return false;
+        }
+        std::cout << "SHA256 verification passed.\n";
+      } catch (const std::exception &e) {
+        std::cerr << "Error during SHA256 calculation: " << e.what()
+                  << std::endl;
+        fs::remove(zip_file);
+        return false;
+      }
+    }
+
+    std::cout << "Extracting " << lib.name << "...\n";
+
+    // 解压文件
+    if (!SafeCommandExecutor::unzip_file(zip_file, third_party_dir)) {
+      std::cerr << "Failed to extract " << lib.name << std::endl;
+      return false;
+    }
+
+    // 删除压缩包（异步执行）
+    std::thread([zip_file]() {
+      std::this_thread::sleep_for(std::chrono::seconds(1)); // 稍等确保解压完成
+      try {
+        if (fs::exists(zip_file)) {
+          fs::remove(zip_file);
+          std::cout << "Cleaned up temporary zip file.\n";
+        }
+      } catch (const std::exception &e) {
+        std::cerr << "Error removing zip file: " << e.what() << std::endl;
+      }
+    }).detach();
+
+    return true;
+  }
+
+  // 原有的生成指南方法保持不变
+  static void generate_library_guide(const fs::path &project_path,
+                                     const ThirdPartyLibrary &lib) {
+    const fs::path docs_dir = project_path / "docs";
+    Utils::safe_create_directory(docs_dir);
+
+    const fs::path guide_path = docs_dir / (lib.name + "_GUIDE.md");
+
+    std::string content = "# " + lib.name + " Integration Guide\n\n";
+    content += "## Installation\n";
+    content += "The library has been downloaded to: `third_party/" +
+               fs::path(lib.downloadUrl).stem().string() + "`\n\n";
+    content += "## Configuration\n";
+    content += "### CMake Configuration\n";
+    content += "```cmake\n" + lib.configInstructions + "\n```\n\n";
+    content += "### Include in Code\n";
+
+    if (lib.name == "GLFW") {
+      content += "```cpp\n#include <GLFW/glfw3.h>\n```\n\n";
+    } else if (lib.name == "Boost") {
+      content += "```cpp\n#include <boost/filesystem.hpp>\n```\n\n";
+    } else if (lib.name == "SDL2") {
+      content += "```cpp\n#include <SDL.h>\n```\n\n";
+    } else {
+      content += "```cpp\n#include <" + lib.name + ".h>\n```\n\n";
+    }
+
+    content += "## Official Documentation\n";
+    if (lib.name == "GLFW") {
+      content += "- [GLFW Documentation](链接5)\n";
+    } else if (lib.name == "Boost") {
+      content += "- [Boost Documentation](链接6)\n";
+    } else if (lib.name == "SDL2") {
+      content += "- [SDL2 Documentation](链接2)\n";
+    } else {
+      content += "- Check the official website for " + lib.name + "\n";
+    }
+
+    Utils::safe_write_file(guide_path, content);
+  }
+
+  // 原有的CMake更新方法保持不变
   static void update_cmake_with_library(const fs::path &project_path,
-                                      const ThirdPartyLibrary &lib) {
+                                        const ThirdPartyLibrary &lib) {
     const fs::path cmake_path = project_path / "CMakeLists.txt";
     if (!fs::exists(cmake_path)) {
       return; // 如果没有CMakeLists.txt，跳过
@@ -1827,7 +2354,8 @@ public:
 
     std::string current_content = Utils::safe_read_file(cmake_path);
     if (current_content.find(lib.name) != std::string::npos) {
-      std::cout << "Library " << lib.name << " already configured in CMakeLists.txt\n";
+      std::cout << "Library " << lib.name
+                << " already configured in CMakeLists.txt\n";
       return;
     }
 
@@ -1836,15 +2364,16 @@ public:
     if (cmake) {
       cmake << "\n# " << lib.name << " Configuration\n";
       cmake << lib.configInstructions << "\n";
-      std::cout << "Updated CMakeLists.txt with " << lib.name << " configuration\n";
+      std::cout << "Updated CMakeLists.txt with " << lib.name
+                << " configuration\n";
     }
   }
 
-  // 列出所有可用库
+  // 原有的列表方法保持不变
   static void list_available_libraries() {
     auto &provider = get_provider();
     auto libraries = provider.get_available_libraries();
-    
+
     std::cout << "\nAvailable libraries (" << libraries.size() << "):\n";
     for (const auto &lib_name : libraries) {
       auto lib_info = provider.get_library_info(lib_name);
@@ -1856,15 +2385,15 @@ public:
     }
   }
 
-  // 刷新库信息
+  // 原有的刷新方法保持不变
   static bool refresh_library_info() {
     auto &provider = get_provider();
-    std::cout << "Refreshing library information from: " 
+    std::cout << "Refreshing library information from: "
               << provider.get_provider_name() << std::endl;
     return provider.refresh_library_info();
   }
 
-  // 获取库信息文件路径
+  // 原有的获取路径方法保持不变
   static fs::path get_library_info_path() {
     auto &provider = get_provider();
     return provider.get_library_info_path();
@@ -1899,9 +2428,8 @@ public:
       generate_launch_json(vscode_dir, project_name, compiler, debugger);
     }));
 
-    futures.push_back(std::async(std::launch::async, [&]() {
-      generate_settings_json(vscode_dir);
-    }));
+    futures.push_back(std::async(
+        std::launch::async, [&]() { generate_settings_json(vscode_dir); }));
 
     futures.push_back(std::async(std::launch::async, [&]() {
       generate_cmake_file(project_path, project_name, compiler);
@@ -1911,9 +2439,8 @@ public:
       generate_main_cpp(project_path, project_name);
     }));
 
-    futures.push_back(std::async(std::launch::async, [&]() {
-      generate_gitignore(project_path);
-    }));
+    futures.push_back(std::async(std::launch::async,
+                                 [&]() { generate_gitignore(project_path); }));
 
     futures.push_back(std::async(std::launch::async, [&]() {
       generate_readme(project_path, project_name);
@@ -1946,10 +2473,14 @@ private:
                 "UNICODE",
                 "_UNICODE"
             ],
-            "compilerPath": ")" + compilerPath + R"(",
-            "cStandard": ")" + compiler.cStandard + R"(",
-            "cppStandard": ")" + compiler.cppStandard + R"(",
-            "intelliSenseMode": ")" + intelliSenseMode + R"("
+            "compilerPath": ")" +
+                          compilerPath + R"(",
+            "cStandard": ")" +
+                          compiler.cStandard + R"(",
+            "cppStandard": ")" +
+                          compiler.cppStandard + R"(",
+            "intelliSenseMode": ")" +
+                          intelliSenseMode + R"("
         },
         {
             "name": "Linux",
@@ -1959,10 +2490,14 @@ private:
                 "${workspaceFolder}/third_party/**"
             ],
             "defines": [],
-            "compilerPath": ")" + compilerPath + R"(",
-            "cStandard": ")" + compiler.cStandard + R"(",
-            "cppStandard": ")" + compiler.cppStandard + R"(",
-            "intelliSenseMode": ")" + intelliSenseMode + R"("
+            "compilerPath": ")" +
+                          compilerPath + R"(",
+            "cStandard": ")" +
+                          compiler.cStandard + R"(",
+            "cppStandard": ")" +
+                          compiler.cppStandard + R"(",
+            "intelliSenseMode": ")" +
+                          intelliSenseMode + R"("
         }
     ],
     "version": 4
@@ -2042,7 +2577,8 @@ private:
 
     std::string args;
     if (compiler.type == CompilerType::MSVC) {
-      args = R"(                "/std:)" + compiler.cppStandard.substr(2) + R"(",
+      args =
+          R"(                "/std:)" + compiler.cppStandard.substr(2) + R"(",
                 "/I${workspaceFolder}/include",
                 "/I${workspaceFolder}/third_party",)";
     } else {
@@ -2069,19 +2605,23 @@ private:
         {
             "label": "Build",
             "type": "shell",
-            "command": ")" + compilerPath + R"(",
+            "command": ")" +
+                          compilerPath + R"(",
             "args": [
 )" + args + R"(
                 "${workspaceFolder}/src/*.cpp",
                 "-o",
-                "${workspaceFolder}/build/bin/Debug/)" + project_name + output_ext + R"("
+                "${workspaceFolder}/build/bin/Debug/)" +
+                          project_name + output_ext + R"("
             ],
             "group": {
                 "kind": "build",
                 "isDefault": true
             },
-            "problemMatcher": [)" + problemMatcher + R"(],
-            "detail": "Built with )" + compiler.name + R"("
+            "problemMatcher": [)" +
+                          problemMatcher + R"(],
+            "detail": "Built with )" +
+                          compiler.name + R"("
         },
         {
             "label": "Clean",
@@ -2122,22 +2662,27 @@ private:
       debuggerType = "cppdbg";
     }
 
-    std::string content = R"({
+    std::string content =
+        R"({
     "version": "0.2.0",
     "configurations": [
         {
-            "name": "Debug )" + project_name + R"(",
+            "name": "Debug )" +
+        project_name + R"(",
             "type": "cppdbg",
             "request": "launch",
             "program": "${workspaceFolder}/build/bin/Debug/)" +
-                          project_name + output_ext + R"(",
+        project_name + output_ext + R"(",
             "args": [],
             "stopAtEntry": false,
             "cwd": "${workspaceFolder}",
             "environment": [],
-            "externalConsole": )" + (compiler.type == CompilerType::MSVC ? "true" : "false") + R"(,
-            "MIMode": ")" + debuggerType + R"(",
-            "miDebuggerPath": ")" + debuggerPath + R"(",
+            "externalConsole": )" +
+        (compiler.type == CompilerType::MSVC ? "true" : "false") + R"(,
+            "MIMode": ")" +
+        debuggerType + R"(",
+            "miDebuggerPath": ")" +
+        debuggerPath + R"(",
             "setupCommands": [
                 {
                     "description": "Enable pretty-printing for gdb",
@@ -2179,14 +2724,17 @@ private:
                                   const std::string &project_name,
                                   const CompilerConfig &compiler) {
     std::string content = R"(cmake_minimum_required(VERSION 3.20)
-project()" + project_name + R"( VERSION 1.0.0 LANGUAGES C CXX)
+project()" + project_name +
+                          R"( VERSION 1.0.0 LANGUAGES C CXX)
 
 # Set C++ standard
-set(CMAKE_CXX_STANDARD )" + compiler.cppStandard.substr(2) + R"()
+set(CMAKE_CXX_STANDARD )" +
+                          compiler.cppStandard.substr(2) + R"()
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 # Set C standard
-set(CMAKE_C_STANDARD )" + compiler.cStandard.substr(1) + R"()
+set(CMAKE_C_STANDARD )" + compiler.cStandard.substr(1) +
+                          R"()
 set(CMAKE_C_STANDARD_REQUIRED ON)
 
 # Build configuration
@@ -2200,10 +2748,12 @@ include_directories(third_party)
 file(GLOB_RECURSE SOURCES "src/*.cpp" "src/*.c")
 
 # Create executable
-add_executable()" + project_name + R"( ${SOURCES})
+add_executable()" + project_name +
+                          R"( ${SOURCES})
 
 # Compiler options
-target_compile_options()" + project_name + R"( PRIVATE)";
+target_compile_options()" +
+                          project_name + R"( PRIVATE)";
 
     // 添加编译器特定选项
     for (const auto &arg : compiler.extraArgs) {
@@ -2213,7 +2763,8 @@ target_compile_options()" + project_name + R"( PRIVATE)";
     content += R"()
 
 # Installation
-install(TARGETS )" + project_name + R"( DESTINATION bin)
+install(TARGETS )" +
+               project_name + R"( DESTINATION bin)
 install(DIRECTORY include/ DESTINATION include)
 
 # Third-party libraries configuration will be added here automatically
@@ -2231,7 +2782,8 @@ install(DIRECTORY include/ DESTINATION include)
     std::string content = R"(#include <iostream>
 
 int main() {
-    std::cout << "Hello, )" + project_name + R"(!\n";
+    std::cout << "Hello, )" +
+                          project_name + R"(!\n";
     std::cout << "Project created successfully!\n";
     std::cout << "Build with: cmake -B build && cmake --build build\n";
     return 0;
@@ -2278,8 +2830,8 @@ Thumbs.db
   }
 
   // 生成README.md
-static void generate_readme(const fs::path &project_path,
-                             const std::string &project_name) {
+  static void generate_readme(const fs::path &project_path,
+                              const std::string &project_name) {
     std::string content = R"(# )" + project_name + R"(
 
 A C++ project created with SLN2Code.
@@ -2433,18 +2985,21 @@ public:
     std::cout
         << "Usage: " << program_name << " [options]\n\n"
         << "Project Creation Options:\n"
-        << "  -n, --name NAME           Set project name (default: " 
+        << "  -n, --name NAME           Set project name (default: "
         << Constants::DEFAULT_PROJECT_NAME << ")\n"
-        << "  -p, --path PATH           Set project path (default: current directory)\n\n"
+        << "  -p, --path PATH           Set project path (default: current "
+           "directory)\n\n"
         << "Library Management Options:\n"
         << "  -I, --install LIB         Install third-party library\n"
         << "  -lm, --library-mirror URL Use custom library mirror\n"
         << "  -ll, --list-libraries     List available libraries\n"
         << "  -rl, --refresh-libraries  Refresh library information\n\n"
         << "Compiler Options:\n"
-        << "  -c, --compiler COMPILER    Set compiler (gcc, g++, clang, clang++, cl)\n"
+        << "  -c, --compiler COMPILER    Set compiler (gcc, g++, clang, "
+           "clang++, cl)\n"
         << "  -cp, --compiler-path PATH   Set compiler path\n"
-        << "  -cppstd, --cpp-standard STD Set C++ standard (c++98, c++11, etc.)\n"
+        << "  -cppstd, --cpp-standard STD Set C++ standard (c++98, c++11, "
+           "etc.)\n"
         << "  -cstd, --c-standard STD     Set C standard (c99, c11, etc.)\n"
         << "  -ea, --extra-args ARGS      Set additional compiler flags\n\n"
         << "Debugger Options:\n"
@@ -2455,7 +3010,8 @@ public:
         << "  -h, --help                Show this help message\n\n"
         << "Examples:\n"
         << "  " << program_name << " -n myproject -I glfw -I sdl2\n"
-        << "  " << program_name << " --library-mirror https://example.com/libs.json\n"
+        << "  " << program_name
+        << " --library-mirror https://example.com/libs.json\n"
         << "  " << program_name << " --list-libraries\n";
   }
 
@@ -2512,7 +3068,8 @@ int main(int argc, char *argv[]) {
 
     // 配置库镜像（如果指定）
     if (!options.library_mirror_url.empty()) {
-      if (!LibraryService::configure_library_mirror(options.library_mirror_url)) {
+      if (!LibraryService::configure_library_mirror(
+              options.library_mirror_url)) {
         std::cerr << "Failed to configure library mirror.\n";
         return 1;
       }
@@ -2523,8 +3080,8 @@ int main(int argc, char *argv[]) {
       print_logo();
       CommandLineParser::print_version();
       std::cout << "\n";
-      
-      std::cout << "Enter project name (default: " 
+
+      std::cout << "Enter project name (default: "
                 << Constants::DEFAULT_PROJECT_NAME << "): ";
       std::string input_name;
       std::getline(std::cin, input_name);
