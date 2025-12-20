@@ -24,18 +24,10 @@ SLN2Code 是一个现代 C++ 项目脚手架工具，专为使用 Visual Studio 
 •📁 ​​Standardized directory structure​ | 📁 ​​标准化的目录结构​
 ### Quick Start 快速入门  
 Compile the Tool 编译工具  
-```
-g++ -g main.cpp -o main.exe -std=c++17
-```
-or 或者  
 Use cmake build  使用cmake构建  
-Run 运行  
 ```
-main.exe -n your project name -p your project dir
+cmake --build build 
 ```
-or 或者  
-Double click open the CLI interface 双击打开 CLI 界面  
-### F.A.Q. 常见问题  
 
 
 
