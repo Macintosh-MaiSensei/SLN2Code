@@ -1,3 +1,7 @@
+/* This file contains the header for the YAML to JSON converter */
+/*It's a part of the SLN2Code project*/
+/*Created by Macintosh-MaiSensei on 2025/12/20*/
+#pragma once
 #include <string>
 #include <vector>
 #include <memory>
