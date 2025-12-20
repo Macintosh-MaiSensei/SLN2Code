@@ -1,4 +1,4 @@
-/*Created by Macintosh-MaiSensei on 2025/11/23.*/
+/*Created by Macintosh-MaiSensei on 2025/12/20.*/
 /*Version 1.0.4 Alpha*/
 #include "yaml2json.hpp"
 #include <algorithm>
