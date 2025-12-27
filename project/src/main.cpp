@@ -1,4 +1,4 @@
-/*Created by Macintosh-MaiSensei on 2025/12/20.*/
+/*Created by Macintosh-MaiSensei on 2025/12/27.*/
 /*Version 1.0.4 Alpha*/
 #include "yaml2json.hpp"
 #include <algorithm>
@@ -16,7 +16,6 @@
 #include <functional>
 #include <future>
 #include <iomanip>
-#include <iostream>
 #include <map>
 #include <memory>
 #include <mutex>
@@ -30,6 +29,9 @@
 #include <unordered_map>
 #include <variant>
 #include <vector>
+#include <cstring>
+#include <iostream>
+#include <stdexcept>
 
 // 包含nlohmann/json库
 #include <json.hpp>
@@ -43,10 +45,17 @@
 #include <io.h>
 #include <process.h>
 #include <windows.h>
+#include <process.h>
+#include <shellapi.h>
+#include <tchar.h>
 #else
 #include <cstdio>
 #include <sys/types.h>
 #include <sys/wait.h>
+#include <errno.h>
+#include <fcntl.h>
+#include <sys/stat.h>
+#include <unistd.h>
 #endif
 
 namespace fs = std::filesystem;
@@ -321,34 +330,6 @@ public:
     return result.str();
   }
 };
-
-#include <algorithm>
-#include <array>
-#include <cstdlib>
-#include <cstring>
-#include <filesystem>
-#include <iostream>
-#include <memory>
-#include <regex>
-#include <stdexcept>
-#include <string>
-#include <vector>
-
-#ifdef _WIN32
-#include <process.h>
-#include <shellapi.h>
-#include <tchar.h>
-#include <windows.h>
-#else
-#include <errno.h>
-#include <fcntl.h>
-#include <sys/stat.h>
-#include <sys/types.h>
-#include <sys/wait.h>
-#include <unistd.h>
-#endif
-
-namespace fs = std::filesystem;
 
 class SafeCommandExecutor {
 public:
