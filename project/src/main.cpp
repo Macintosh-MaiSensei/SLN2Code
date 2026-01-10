@@ -441,7 +441,7 @@ private:
 			
 			std::array<char, 128> buffer;
 			std::string result;
-			FILE* pipe = _popen(command_line.c_str(), "r");
+			FILE* pipe = popen(command_line.c_str(), "r");
 			
 			if (!pipe) {
 				throw std::runtime_error("popen() failed!");
@@ -452,11 +452,11 @@ private:
 					result += buffer.data();
 				}
 			} catch (...) {
-				_pclose(pipe);
+				pclose(pipe);
 				throw;
 			}
 			
-			int return_code = _pclose(pipe);
+			int return_code = pclose(pipe);
 			if (return_code != 0) {
 				throw std::runtime_error(
 										 "Command failed with exit code: " + std::to_string(return_code) +
