@@ -352,7 +352,7 @@ private:
 						<< ec.message() << std::endl;
 						return false;
 					}
-					std::cout << "Created directory: " << path << std::endl;
+					//std::cout << "Created directory: " << path << std::endl;
 				}
 				return true;
 			} catch (const fs::filesystem_error &e) {
