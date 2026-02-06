@@ -1,4 +1,4 @@
-/*Created by Macintosh-MaiSensei on 2026/1/17.*/
+/*Created by Macintosh-MaiSensei on 2026/2/6.*/
 /*Version 1.0.4 Alpha*/
 #include "yaml2json.hpp"
 #include <algorithm>
@@ -773,12 +773,18 @@ public:
   static std::string clean_path(const std::string &input) {
     std::string cleaned = input;
 
+    cleaned.erase(0, cleaned.find_first_not_of(" \t\r\n"));
+    cleaned.erase(cleaned.find_last_not_of(" \t\r\n") + 1);
     
+    while (!cleaned.empty() && (cleaned.front() == '\'' || cleaned.front() == '"'))
+        cleaned.erase(0, 1);
+    while (!cleaned.empty() && (cleaned.back() == '\'' || cleaned.back() == '"'))
+        cleaned.pop_back();
+
     std::replace(cleaned.begin(), cleaned.end(), '\\', '/');
 
-    
     if (!cleaned.empty() && cleaned.back() == '/' && cleaned.size() > 1) {
-      cleaned.pop_back();
+        cleaned.pop_back();
     }
 
     return cleaned;
@@ -791,7 +797,6 @@ public:
     }
     std::string name = input;
 
-    
     name.erase(std::remove_if(name.begin(), name.end(),
                               [](char c) {
                                 return !(std::isalnum(c) || c == '-' ||
