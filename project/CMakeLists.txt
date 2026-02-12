@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.15)
 
 # 设置Vcpkg工具链（如果需要，请取消注释并填写路径）
-# set(CMAKE_TOOLCHAIN_FILE "your/vcpkg/scripts/buildsystems/vcpkg.cmake" CACHE STRING "Vcpkg toolchain file")
+set(CMAKE_TOOLCHAIN_FILE "your/vcpkg/scripts/buildsystems/vcpkg.cmake" CACHE STRING "Vcpkg toolchain file")
 
 project(sln2code)
 
