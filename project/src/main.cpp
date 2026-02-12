@@ -1,5 +1,5 @@
-/*Created by Macintosh-MaiSensei on 2026/2/6.*/
-/*Version 1.0.4 Alpha*/
+/*Created by Macintosh-MaiSensei on 2026/2/12.*/
+/*Version 1.0.4 Beta*/
 #include "yaml2json.hpp"
 #include <algorithm>
 #include <array>
@@ -37,7 +37,9 @@
 #ifndef INCLUDE_NLOHMANN_JSON_HPP_
 #include <nlohmann/json.hpp>
 #endif
-
+extern "C" {
+#include <curl/curl.h>
+}
 #ifdef _WIN32
 #define popen _popen
 #define pclose _pclose
@@ -316,456 +318,498 @@ public:
   }
 };
 
+#include <iostream>
+#include <vector>
+#include <string>
+#include <memory>
+#include <stdexcept>
+#include <regex>
+#include <cctype>
+#include <filesystem>
+#include <curl/curl.h>
+
+namespace fs = std::filesystem;
+
 class SafeCommandExecutor {
 public:
-	
-	static std::string execute(const std::vector<std::string> &args) {
-		return CommandService::execute(args);
-	}
-	
-	static bool download_file(const std::string &url, const fs::path &output_path) {
-		return CommandService::download_file(url, output_path);
-	}
-	
-	static bool unzip_file(const fs::path &zip_file, const fs::path &output_dir) {
-		return CommandService::unzip_file(zip_file, output_dir);
-	}
-	
-	static bool safe_create_directory(const fs::path &path) {
-		return FileUtils::safe_create_directory(path);
-	}
-	
-	static bool is_valid_url(const std::string &url) {
-		return FileUtils::is_valid_url(url);
-	}
-	
+    static std::string execute(const std::vector<std::string> &args) {
+        return CommandService::execute(args);
+    }
+    
+    static bool download_file(const std::string &url, const fs::path &output_path) {
+        return CommandService::download_file(url, output_path);
+    }
+    
+    static bool unzip_file(const fs::path &zip_file, const fs::path &output_dir) {
+        return CommandService::unzip_file(zip_file, output_dir);
+    }
+    
+    static bool safe_create_directory(const fs::path &path) {
+        return FileUtils::safe_create_directory(path);
+    }
+    
+    static bool is_valid_url(const std::string &url) {
+        return FileUtils::is_valid_url(url);
+    }
+    
 private:
-	
-	struct FileUtils {
-		static bool safe_create_directory(const fs::path &path) {
-			try {
-				if (!fs::exists(path)) {
-					std::error_code ec;
-					bool created = fs::create_directories(path, ec);
-					if (!created || ec) {
-						std::cerr << "Failed to create directory " << path << ": "
-						<< ec.message() << std::endl;
-						return false;
-					}
-					//std::cout << "Created directory: " << path << std::endl;
-				}
-				return true;
-			} catch (const fs::filesystem_error &e) {
-				std::cerr << "Error creating directory: " << e.what() << std::endl;
-				return false;
-			}
-		}
-		
-		static bool is_valid_url(const std::string &url) {
-			try {
-				if (url.find("http://") != 0 && url.find("https://") != 0) {
-					return false;
-				}
-				
-				for (char c : url) {
-					if (std::isspace(c) || c < 0x20) {
-						return false;
-					}
-				}
-				
-				if (url.find("..") != std::string::npos ||
-					url.find(";") != std::string::npos ||
-					url.find("|") != std::string::npos ||
-					url.find("`") != std::string::npos ||
-					url.find("$") != std::string::npos ||
-					url.find("(") != std::string::npos ||
-					url.find(")") != std::string::npos) {
-					return false;
-				}
-				
-				if (url.find("https://github.com/") == 0 ||
-					url.find("https://archives.boost.io/") == 0 ||
-					url.find("https://www.libsdl.org/") == 0) {
-					return true;
-				}
-				
-				static const std::regex domain_regex(
-													 R"(^(?:[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}$)");
-				
-				size_t start = url.find("://") + 3;
-				size_t end = url.find('/', start);
-				if (end == std::string::npos) {
-					end = url.length();
-				}
-				
-				std::string domain = url.substr(start, end - start);
-				size_t port_pos = domain.find(':');
-				if (port_pos != std::string::npos) {
-					domain = domain.substr(0, port_pos);
-				}
-				
-				return std::regex_match(domain, domain_regex);
-			} catch (const std::exception &e) {
-				std::cerr << "URL validation error: " << e.what() << "\n";
-				return false;
-			}
-		}
-	};
-	
-	
-	struct IPlatformExecutor {
-		virtual ~IPlatformExecutor() = default;
-		virtual std::string execute(const std::vector<std::string>& args) = 0;
-		virtual bool is_command_available(const std::string& command) = 0;
-		virtual bool is_safe_argument(const std::string& arg) = 0;
-	};
-	
-	
+    struct FileUtils {
+        static bool safe_create_directory(const fs::path &path) {
+            try {
+                if (!fs::exists(path)) {
+                    std::error_code ec;
+                    bool created = fs::create_directories(path, ec);
+                    if (!created || ec) {
+                        std::cerr << "Failed to create directory " << path << ": "
+                                  << ec.message() << std::endl;
+                        return false;
+                    }
+                }
+                return true;
+            } catch (const fs::filesystem_error &e) {
+                std::cerr << "Error creating directory: " << e.what() << std::endl;
+                return false;
+            }
+        }
+        
+        static bool is_valid_url(const std::string &url) {
+            try {
+                if (url.find("http://") != 0 && url.find("https://") != 0) {
+                    return false;
+                }
+                
+                for (char c : url) {
+                    if (std::isspace(c) || c < 0x20) {
+                        return false;
+                    }
+                }
+                
+                if (url.find("..") != std::string::npos ||
+                    url.find(";") != std::string::npos ||
+                    url.find("|") != std::string::npos ||
+                    url.find("`") != std::string::npos ||
+                    url.find("$") != std::string::npos ||
+                    url.find("(") != std::string::npos ||
+                    url.find(")") != std::string::npos) {
+                    return false;
+                }
+                
+                if (url.find("https://github.com/") == 0 ||
+                    url.find("https://archives.boost.io/") == 0 ||
+                    url.find("https://www.libsdl.org/") == 0) {
+                    return true;
+                }
+                
+                static const std::regex domain_regex(
+                    R"(^(?:[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}$)");
+                
+                size_t start = url.find("://") + 3;
+                size_t end = url.find('/', start);
+                if (end == std::string::npos) {
+                    end = url.length();
+                }
+                
+                std::string domain = url.substr(start, end - start);
+                size_t port_pos = domain.find(':');
+                if (port_pos != std::string::npos) {
+                    domain = domain.substr(0, port_pos);
+                }
+                
+                return std::regex_match(domain, domain_regex);
+            } catch (const std::exception &e) {
+                std::cerr << "URL validation error: " << e.what() << "\n";
+                return false;
+            }
+        }
+    };
+    
+    struct LibcurlDownloader {
+    private:
+        static size_t write_data(void* ptr, size_t size, size_t nmemb, FILE* stream) {
+            size_t written = fwrite(ptr, size, nmemb, stream);
+            return written;
+        }
+        
+        static int progress_callback(void* clientp, curl_off_t dltotal, curl_off_t dlnow, curl_off_t ultotal, curl_off_t ulnow) {
+            if (dltotal > 0) {
+                double percent = static_cast<double>(dlnow) / dltotal * 100.0;
+                std::cout << "\rDownload progress: " << static_cast<int>(percent) << "% ("
+                          << dlnow << "/" << dltotal << " bytes)";
+                std::cout.flush();
+            }
+            return 0;
+        }
+        
+    public:
+        static bool download(const std::string& url, const fs::path& output_path) {
+            CURL* curl = curl_easy_init();
+            if (!curl) {
+                std::cerr << "Failed to initialize libcurl" << std::endl;
+                return false;
+            }
+            
+            FILE* fp = fopen(output_path.string().c_str(), "wb");
+            if (!fp) {
+                std::cerr << "Failed to open file for writing: " << output_path << std::endl;
+                curl_easy_cleanup(curl);
+                return false;
+            }
+            
+            bool success = false;
+            
+            curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
+            curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, write_data);
+            curl_easy_setopt(curl, CURLOPT_WRITEDATA, fp);
+            curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
+            curl_easy_setopt(curl, CURLOPT_MAXREDIRS, 10L);
+            curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, 30L);
+            curl_easy_setopt(curl, CURLOPT_TIMEOUT, 300L);
+            curl_easy_setopt(curl, CURLOPT_NOPROGRESS, 0L);
+            curl_easy_setopt(curl, CURLOPT_XFERINFOFUNCTION, progress_callback);
+            curl_easy_setopt(curl, CURLOPT_FAILONERROR, 1L);
+            curl_easy_setopt(curl, CURLOPT_USERAGENT, "SafeCommandExecutor/1.0");
+            
+            CURLcode res = curl_easy_perform(curl);
+            
+            if (res == CURLE_OK) {
+                long response_code;
+                curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &response_code);
+                
+                if (response_code >= 200 && response_code < 300) {
+                    curl_off_t dl_size;
+                    curl_easy_getinfo(curl, CURLINFO_SIZE_DOWNLOAD_T, &dl_size);
+                    std::cout << "\nDownload successful. Downloaded " << dl_size << " bytes" << std::endl;
+                    success = true;
+                } else {
+                    std::cerr << "\nHTTP error: " << response_code << std::endl;
+                }
+            } else {
+                std::cerr << "\nDownload failed: " << curl_easy_strerror(res) << std::endl;
+            }
+            
+            fclose(fp);
+            curl_easy_cleanup(curl);
+            
+            if (!success && fs::exists(output_path)) {
+                std::error_code ec;
+                fs::remove(output_path, ec);
+                if (ec) {
+                    std::cerr << "Failed to remove partial download: " << ec.message() << std::endl;
+                }
+            }
+            
+            return success;
+        }
+    };
+    
+    struct IPlatformExecutor {
+        virtual ~IPlatformExecutor() = default;
+        virtual std::string execute(const std::vector<std::string>& args) = 0;
+        virtual bool is_command_available(const std::string& command) = 0;
+        virtual bool is_safe_argument(const std::string& arg) = 0;
+    };
+    
 #ifdef _WIN32
-	struct WindowsExecutor : public IPlatformExecutor {
-		std::string execute(const std::vector<std::string>& args) override {
-			if (args.empty()) {
-				throw std::invalid_argument("No command to execute");
-			}
-			
-			std::string command_line;
-			for (size_t i = 0; i < args.size(); ++i) {
-				if (i > 0) command_line += " ";
-				if (args[i].find(' ') != std::string::npos || args[i].find('\t') != std::string::npos) {
-					command_line += "\"" + args[i] + "\"";
-				} else {
-					command_line += args[i];
-				}
-			}
-			command_line += " 2>&1";
-			
-			std::array<char, 128> buffer;
-			std::string result;
-			FILE* pipe = popen(command_line.c_str(), "r");
-			
-			if (!pipe) {
-				throw std::runtime_error("popen() failed!");
-			}
-			
-			try {
-				while (fgets(buffer.data(), static_cast<int>(buffer.size()), pipe) != nullptr) {
-					result += buffer.data();
-				}
-			} catch (...) {
-				pclose(pipe);
-				throw;
-			}
-			
-			int return_code = pclose(pipe);
-			if (return_code != 0) {
-				throw std::runtime_error(
-										 "Command failed with exit code: " + std::to_string(return_code) +
-										 "\nOutput: " + result);
-			}
-			
-			return result;
-		}
-		
-		bool is_command_available(const std::string& command) override {
-			std::string check_cmd = "where " + command + " >nul 2>nul";
-			int result = std::system(check_cmd.c_str());
-			return result == 0;
-		}
-		
-		bool is_safe_argument(const std::string& arg) override {
-			if (arg.empty()) return false;
-			const std::string dangerous_chars = ";&|`$><!*?{}[]()^%";
-			for (char c : dangerous_chars) {
-				if (arg.find(c) != std::string::npos) return false;
-			}
-			if (arg.find("..") != std::string::npos) return false;
-			if (arg.find('\n') != std::string::npos || arg.find('\r') != std::string::npos) return false;
-			return true;
-		}
-	};
-#endif 
-	
-	
+    struct WindowsExecutor : public IPlatformExecutor {
+        std::string execute(const std::vector<std::string>& args) override {
+            if (args.empty()) {
+                throw std::invalid_argument("No command to execute");
+            }
+            
+            std::string command_line;
+            for (size_t i = 0; i < args.size(); ++i) {
+                if (i > 0) command_line += " ";
+                if (args[i].find(' ') != std::string::npos || args[i].find('\t') != std::string::npos) {
+                    command_line += "\"" + args[i] + "\"";
+                } else {
+                    command_line += args[i];
+                }
+            }
+            command_line += " 2>&1";
+            
+            std::array<char, 128> buffer;
+            std::string result;
+            FILE* pipe = _popen(command_line.c_str(), "r");
+            
+            if (!pipe) {
+                throw std::runtime_error("_popen() failed!");
+            }
+            
+            try {
+                while (fgets(buffer.data(), static_cast<int>(buffer.size()), pipe) != nullptr) {
+                    result += buffer.data();
+                }
+            } catch (...) {
+                _pclose(pipe);
+                throw;
+            }
+            
+            int return_code = _pclose(pipe);
+            if (return_code != 0) {
+                throw std::runtime_error(
+                    "Command failed with exit code: " + std::to_string(return_code) +
+                    "\nOutput: " + result);
+            }
+            
+            return result;
+        }
+        
+        bool is_command_available(const std::string& command) override {
+            std::string check_cmd = "where " + command + " >nul 2>nul";
+            int result = std::system(check_cmd.c_str());
+            return result == 0;
+        }
+        
+        bool is_safe_argument(const std::string& arg) override {
+            if (arg.empty()) return false;
+            const std::string dangerous_chars = ";&|`$><!*?{}[]()^%";
+            for (char c : dangerous_chars) {
+                if (arg.find(c) != std::string::npos) return false;
+            }
+            if (arg.find("..") != std::string::npos) return false;
+            if (arg.find('\n') != std::string::npos || arg.find('\r') != std::string::npos) return false;
+            return true;
+        }
+    };
+#endif
+    
 #ifndef _WIN32
-	struct PosixExecutor : public IPlatformExecutor {
-		std::string execute(const std::vector<std::string>& args) override {
-			if (args.empty()) {
-				throw std::invalid_argument("No command to execute");
-			}
-			
-			std::vector<char*> argv;
-			for (const auto& arg : args) {
-				argv.push_back(const_cast<char*>(arg.c_str()));
-			}
-			argv.push_back(nullptr);
-			
-			int pipefd[2];
-			if (pipe(pipefd) == -1) {
-				throw std::runtime_error("Failed to create pipe: " + std::string(strerror(errno)));
-			}
-			
-			pid_t pid = fork();
-			if (pid == -1) {
-				close(pipefd[0]);
-				close(pipefd[1]);
-				throw std::runtime_error("Failed to fork process: " + std::string(strerror(errno)));
-			}
-			
-			if (pid == 0) {
-				close(pipefd[0]);
-				if (dup2(pipefd[1], STDOUT_FILENO) == -1) { perror("dup2 stdout"); exit(EXIT_FAILURE); }
-				if (dup2(pipefd[1], STDERR_FILENO) == -1) { perror("dup2 stderr"); exit(EXIT_FAILURE); }
-				close(pipefd[1]);
-				
-				if (setgid(getgid()) != 0 || setuid(getuid()) != 0) {
-					perror("setgid/setuid");
-					exit(EXIT_FAILURE);
-				}
-				
-				execvp(argv[0], argv.data());
-				std::cerr << "Failed to execute command: " << argv[0] << " - " << strerror(errno) << std::endl;
-				exit(EXIT_FAILURE);
-			}
-			
-			close(pipefd[1]);
-			std::string result;
-			char buffer[4096];
-			ssize_t count;
-			
-			while ((count = read(pipefd[0], buffer, sizeof(buffer) - 1)) > 0) {
-				buffer[count] = '\0';
-				result.append(buffer, count);
-			}
-			
-			if (count == -1 && errno != EINTR) {
-				close(pipefd[0]);
-				throw std::runtime_error("Error reading from pipe: " + std::string(strerror(errno)));
-			}
-			
-			close(pipefd[0]);
-			
-			int status;
-			do {
-				if (waitpid(pid, &status, 0) == -1) {
-					if (errno == EINTR) continue;
-					throw std::runtime_error("waitpid failed: " + std::string(strerror(errno)));
-				}
-			} while (!WIFEXITED(status) && !WIFSIGNALED(status));
-			
-			if (WIFEXITED(status) && WEXITSTATUS(status) != 0) {
-				throw std::runtime_error("Command exited with non-zero status: " +
-										 std::to_string(WEXITSTATUS(status)) + "\nOutput: " + result);
-			}
-			
-			if (WIFSIGNALED(status)) {
-				throw std::runtime_error("Command terminated by signal: " + std::to_string(WTERMSIG(status)));
-			}
-			
-			return result;
-		}
-		
-		bool is_command_available(const std::string& command) override {
-			std::string check_cmd = "which " + command + " >/dev/null 2>&1";
-			int result = std::system(check_cmd.c_str());
-			return result == 0;
-		}
-		
-		bool is_safe_argument(const std::string& arg) override {
-			if (arg.empty()) return false;
-			const std::string dangerous_chars = ";&|`$><!*?{}[]()~";
-			for (char c : dangerous_chars) {
-				if (arg.find(c) != std::string::npos) return false;
-			}
-			if (arg.find("..") != std::string::npos) return false;
-			if (arg.find('\n') != std::string::npos || arg.find('\r') != std::string::npos) return false;
-			return true;
-		}
-	};
-#endif 
-	
-	
-	struct ExecutorFactory {
-		static IPlatformExecutor* create() {
-#ifdef _WIN32
-			return new WindowsExecutor();
-#else
-			return new PosixExecutor();
+    struct PosixExecutor : public IPlatformExecutor {
+        std::string execute(const std::vector<std::string>& args) override {
+            if (args.empty()) {
+                throw std::invalid_argument("No command to execute");
+            }
+            
+            std::vector<char*> argv;
+            for (const auto& arg : args) {
+                argv.push_back(const_cast<char*>(arg.c_str()));
+            }
+            argv.push_back(nullptr);
+            
+            int pipefd[2];
+            if (pipe(pipefd) == -1) {
+                throw std::runtime_error("Failed to create pipe: " + std::string(strerror(errno)));
+            }
+            
+            pid_t pid = fork();
+            if (pid == -1) {
+                close(pipefd[0]);
+                close(pipefd[1]);
+                throw std::runtime_error("Failed to fork process: " + std::string(strerror(errno)));
+            }
+            
+            if (pid == 0) {
+                close(pipefd[0]);
+                if (dup2(pipefd[1], STDOUT_FILENO) == -1) { perror("dup2 stdout"); exit(EXIT_FAILURE); }
+                if (dup2(pipefd[1], STDERR_FILENO) == -1) { perror("dup2 stderr"); exit(EXIT_FAILURE); }
+                close(pipefd[1]);
+                
+                if (setgid(getgid()) != 0 || setuid(getuid()) != 0) {
+                    perror("setgid/setuid");
+                    exit(EXIT_FAILURE);
+                }
+                
+                execvp(argv[0], argv.data());
+                std::cerr << "Failed to execute command: " << argv[0] << " - " << strerror(errno) << std::endl;
+                exit(EXIT_FAILURE);
+            }
+            
+            close(pipefd[1]);
+            std::string result;
+            char buffer[4096];
+            ssize_t count;
+            
+            while ((count = read(pipefd[0], buffer, sizeof(buffer) - 1)) > 0) {
+                buffer[count] = '\0';
+                result.append(buffer, count);
+            }
+            
+            if (count == -1 && errno != EINTR) {
+                close(pipefd[0]);
+                throw std::runtime_error("Error reading from pipe: " + std::string(strerror(errno)));
+            }
+            
+            close(pipefd[0]);
+            
+            int status;
+            do {
+                if (waitpid(pid, &status, 0) == -1) {
+                    if (errno == EINTR) continue;
+                    throw std::runtime_error("waitpid failed: " + std::string(strerror(errno)));
+                }
+            } while (!WIFEXITED(status) && !WIFSIGNALED(status));
+            
+            if (WIFEXITED(status) && WEXITSTATUS(status) != 0) {
+                throw std::runtime_error("Command exited with non-zero status: " +
+                                         std::to_string(WEXITSTATUS(status)) + "\nOutput: " + result);
+            }
+            
+            if (WIFSIGNALED(status)) {
+                throw std::runtime_error("Command terminated by signal: " + std::to_string(WTERMSIG(status)));
+            }
+            
+            return result;
+        }
+        
+        bool is_command_available(const std::string& command) override {
+            std::string check_cmd = "which " + command + " >/dev/null 2>&1";
+            int result = std::system(check_cmd.c_str());
+            return result == 0;
+        }
+        
+        bool is_safe_argument(const std::string& arg) override {
+            if (arg.empty()) return false;
+            const std::string dangerous_chars = ";&|`$><!*?{}[]()~";
+            for (char c : dangerous_chars) {
+                if (arg.find(c) != std::string::npos) return false;
+            }
+            if (arg.find("..") != std::string::npos) return false;
+            if (arg.find('\n') != std::string::npos || arg.find('\r') != std::string::npos) return false;
+            return true;
+        }
+    };
 #endif
-		}
-	};
-	
-	
-	struct CommandService {
-		static std::string execute(const std::vector<std::string> &args) {
-			if (args.empty()) {
-				throw std::invalid_argument("Command arguments cannot be empty");
-			}
-			
-			std::unique_ptr<IPlatformExecutor> executor(ExecutorFactory::create());
-			
-			
-			for (const auto &arg : args) {
-				if (!executor->is_safe_argument(arg)) {
-					throw std::runtime_error("Unsafe argument detected: " + arg);
-				}
-			}
-			
-			
-			std::string command_str;
-			for (const auto &arg : args) {
-				command_str += arg + " ";
-			}
-			std::cout << "Executing safe command: " << command_str << std::endl;
-			
-			
-			return executor->execute(args);
-		}
-		
-		static bool download_file(const std::string &url, const fs::path &output_path) {
-			std::unique_ptr<IPlatformExecutor> executor(ExecutorFactory::create());
-			
-			
-			if (!FileUtils::is_valid_url(url)) {
-				throw std::invalid_argument("Invalid URL format: " + url);
-			}
-			
-			
-			if (output_path.empty() || output_path.is_relative()) {
-				throw std::invalid_argument("Output path must be absolute");
-			}
-			
-			if (output_path.string().find("..") != std::string::npos) {
-				throw std::invalid_argument("Output path contains parent directory traversal");
-			}
-			
-			
-			if (!FileUtils::safe_create_directory(output_path.parent_path())) {
-				throw std::runtime_error("Failed to create output directory");
-			}
-			
-			
-			if (!executor->is_command_available("curl")) {
-				throw std::runtime_error(
-										 "curl command is not available. Please install curl first.");
-			}
-			
-			
-			std::vector<std::string> args = {
-				"curl", "-L", "--silent", "--show-error", "--retry", "3",
-				"--max-time", "300", "--connect-timeout", "30", "--fail",
-				"-o", output_path.string(), url
-			};
-			
-			try {
-				std::string result = execute(args);
-				
-				
-				if (fs::exists(output_path)) {
-					std::error_code ec;
-					auto file_size = fs::file_size(output_path, ec);
-					if (!ec && file_size > 0) {
-						std::cout << "Download successful. File size: " << file_size
-						<< " bytes" << std::endl;
-						return true;
-					} else if (ec) {
-						std::cerr << "Failed to get file size: " << ec.message() << std::endl;
-					} else if (file_size == 0) {
-						std::cerr << "Downloaded file is empty" << std::endl;
-					}
-				} else {
-					std::cerr << "Downloaded file does not exist: " << output_path
-					<< std::endl;
-				}
-				
-				if (!result.empty()) {
-					std::cerr << "Curl output: " << result << std::endl;
-				}
-				return false;
-				
-			} catch (const std::exception &e) {
-				std::cerr << "Download failed: " << e.what() << std::endl;
-				
-				if (fs::exists(output_path)) {
-					std::error_code ec;
-					fs::remove(output_path, ec);
-					if (ec) {
-						std::cerr << "Failed to remove partial download: " << ec.message()
-						<< std::endl;
-					}
-				}
-				return false;
-			}
-		}
-		
-		static bool unzip_file(const fs::path &zip_file, const fs::path &output_dir) {
-			std::unique_ptr<IPlatformExecutor> executor(ExecutorFactory::create());
-			
-			
-			if (!fs::exists(zip_file) || !fs::is_regular_file(zip_file)) {
-				throw std::invalid_argument("Invalid zip file: " + zip_file.string());
-			}
-			
-			
-			if (!FileUtils::safe_create_directory(output_dir)) {
-				throw std::invalid_argument("Failed to create output directory: " +
-											output_dir.string());
-			}
-			
-			
-			if (zip_file.string().find("..") != std::string::npos ||
-				output_dir.string().find("..") != std::string::npos) {
-				throw std::invalid_argument("Path contains parent directory traversal");
-			}
-			
-			std::vector<std::string> args;
+    
+    struct ExecutorFactory {
+        static IPlatformExecutor* create() {
 #ifdef _WIN32
-			
-			if (!executor->is_command_available("powershell")) {
-				throw std::runtime_error("powershell command is not available.");
-			}
-			
-			args = {
-				"powershell",      "-Command",         "Expand-Archive",    "-Path",
-				zip_file.string(), "-DestinationPath", output_dir.string(), "-Force"
-			};
+            return new WindowsExecutor();
 #else
-			
-			if (!executor->is_command_available("unzip")) {
-				throw std::runtime_error(
-										 "unzip command is not available. Please install unzip first.");
-			}
-			
-			args = {"unzip", "-o", zip_file.string(), "-d", output_dir.string()};
+            return new PosixExecutor();
 #endif
-			
-			try {
-				std::string result = execute(args);
-				
-				
-				bool has_files = false;
-				for (const auto &entry : fs::directory_iterator(output_dir)) {
-					has_files = true;
-					break;
-				}
-				
-				if (has_files) {
-					std::cout << "Unzip successful. Files extracted to: " << output_dir
-					<< std::endl;
-					return true;
-				} else {
-					std::cerr << "Unzip completed but no files found in output directory"
-					<< std::endl;
-					return false;
-				}
-				
-			} catch (const std::exception &e) {
-				std::cerr << "Unzip failed: " << e.what() << std::endl;
-				return false;
-			}
-		}
-	};
+        }
+    };
+    
+    struct CommandService {
+        static std::string execute(const std::vector<std::string> &args) {
+            if (args.empty()) {
+                throw std::invalid_argument("Command arguments cannot be empty");
+            }
+            
+            std::unique_ptr<IPlatformExecutor> executor(ExecutorFactory::create());
+            
+            for (const auto &arg : args) {
+                if (!executor->is_safe_argument(arg)) {
+                    throw std::runtime_error("Unsafe argument detected: " + arg);
+                }
+            }
+            
+            std::string command_str;
+            for (const auto &arg : args) {
+                command_str += arg + " ";
+            }
+            std::cout << "Executing safe command: " << command_str << std::endl;
+            
+            return executor->execute(args);
+        }
+        
+        static bool download_file(const std::string &url, const fs::path &output_path) {
+            std::unique_ptr<IPlatformExecutor> executor(ExecutorFactory::create());
+            
+            if (!FileUtils::is_valid_url(url)) {
+                throw std::invalid_argument("Invalid URL format: " + url);
+            }
+            
+            if (output_path.empty() || output_path.is_relative()) {
+                throw std::invalid_argument("Output path must be absolute");
+            }
+            
+            if (output_path.string().find("..") != std::string::npos) {
+                throw std::invalid_argument("Output path contains parent directory traversal");
+            }
+            
+            if (!FileUtils::safe_create_directory(output_path.parent_path())) {
+                throw std::runtime_error("Failed to create output directory");
+            }
+            
+            std::cout << "Downloading from: " << url << std::endl;
+            std::cout << "Saving to: " << output_path << std::endl;
+            
+            bool success = LibcurlDownloader::download(url, output_path);
+            
+            if (success) {
+                if (fs::exists(output_path)) {
+                    std::error_code ec;
+                    auto file_size = fs::file_size(output_path, ec);
+                    if (!ec && file_size > 0) {
+                        std::cout << "Download completed successfully. File size: " 
+                                  << file_size << " bytes" << std::endl;
+                        return true;
+                    } else if (ec) {
+                        std::cerr << "Failed to get file size: " << ec.message() << std::endl;
+                        return false;
+                    } else if (file_size == 0) {
+                        std::cerr << "Downloaded file is empty" << std::endl;
+                        return false;
+                    }
+                }
+            }
+            
+            return false;
+        }
+        
+        static bool unzip_file(const fs::path &zip_file, const fs::path &output_dir) {
+            std::unique_ptr<IPlatformExecutor> executor(ExecutorFactory::create());
+            
+            if (!fs::exists(zip_file) || !fs::is_regular_file(zip_file)) {
+                throw std::invalid_argument("Invalid zip file: " + zip_file.string());
+            }
+            
+            if (!FileUtils::safe_create_directory(output_dir)) {
+                throw std::invalid_argument("Failed to create output directory: " +
+                                            output_dir.string());
+            }
+            
+            if (zip_file.string().find("..") != std::string::npos ||
+                output_dir.string().find("..") != std::string::npos) {
+                throw std::invalid_argument("Path contains parent directory traversal");
+            }
+            
+            std::vector<std::string> args;
+#ifdef _WIN32
+            if (!executor->is_command_available("powershell")) {
+                throw std::runtime_error("powershell command is not available.");
+            }
+            
+            args = {
+                "powershell",      "-Command",         "Expand-Archive",    "-Path",
+                zip_file.string(), "-DestinationPath", output_dir.string(), "-Force"
+            };
+#else
+            if (!executor->is_command_available("unzip")) {
+                throw std::runtime_error(
+                    "unzip command is not available. Please install unzip first.");
+            }
+            
+            args = {"unzip", "-o", zip_file.string(), "-d", output_dir.string()};
+#endif
+            
+            try {
+                std::string result = execute(args);
+                
+                bool has_files = false;
+                for (const auto &entry : fs::directory_iterator(output_dir)) {
+                    has_files = true;
+                    break;
+                }
+                
+                if (has_files) {
+                    std::cout << "Unzip successful. Files extracted to: " << output_dir
+                              << std::endl;
+                    return true;
+                } else {
+                    std::cerr << "Unzip completed but no files found in output directory"
+                              << std::endl;
+                    return false;
+                }
+                
+            } catch (const std::exception &e) {
+                std::cerr << "Unzip failed: " << e.what() << std::endl;
+                return false;
+            }
+        }
+    };
 };
-
 
 class Utils {
 public:
@@ -3005,6 +3049,8 @@ void print_logo() {
 }
 
 int main(int argc, char *argv[]) {
+  curl_global_init(CURL_GLOBAL_DEFAULT);
+
   try {
     
     CommandLineParser::Options options = CommandLineParser::parse(argc, argv);
@@ -3160,9 +3206,11 @@ int main(int argc, char *argv[]) {
 
     std::cout << "Press Enter to exit...\n";
     std::cin.get();
+    curl_global_cleanup();
     return 0;
   } catch (const std::exception &e) {
     std::cerr << "Error: " << e.what() << std::endl;
+    curl_global_cleanup();
     return 1;
   }
 }
