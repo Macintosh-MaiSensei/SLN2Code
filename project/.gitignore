@@ -1,0 +1,17 @@
+# Build artifacts
+build/
+*.exe
+*.out
+*.o
+*.obj
+
+# Editor files
+.vscode/
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/c_cpp_properties.json
+!.vscode/settings.json
+
+# System files
+.DS_Store
+Thumbs.db
