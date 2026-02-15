@@ -318,18 +318,6 @@ public:
   }
 };
 
-#include <iostream>
-#include <vector>
-#include <string>
-#include <memory>
-#include <stdexcept>
-#include <regex>
-#include <cctype>
-#include <filesystem>
-#include <curl/curl.h>
-
-namespace fs = std::filesystem;
-
 class SafeCommandExecutor {
 public:
     static std::string execute(const std::vector<std::string> &args) {
