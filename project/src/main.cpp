@@ -97,6 +97,57 @@ public:
 };
 
 class ThirdPartyLibrary {
+private:
+  static std::string detectSystem() {
+#ifdef _WIN32
+    return "WINDOWS";
+#elif __APPLE__
+    return "MACOS";
+#elif __linux__
+    return "LINUX";
+#else
+    return "UNKNOWN";
+#endif
+  }
+
+  static std::string detectArch() {
+#ifdef _WIN64
+    return "x64";
+#elif __x86_64__ || __ppc64__ || _M_X64
+    return "x64";
+#elif __i386__ || _M_IX86
+    return "x86";
+#elif __aarch64__ || __arm64__
+    return "ARM64";
+#elif __arm__
+    return "ARM";
+#else
+    return "UNKNOWN";
+#endif
+  }
+
+  static std::string replacePlaceholders(const std::string &input,
+                                         const std::string &system,
+                                         const std::string &arch,
+                                         const std::string &version = "") {
+    std::string result = input;
+
+    std::unordered_map<std::string, std::string> replacements = {
+        {"{SYSTEM}", system}, {"{ARCH}", arch}, {"{VERSION}", version}};
+
+    for (const auto &[placeholder, value] : replacements) {
+      if (value.empty())
+        continue; 
+      size_t pos = 0;
+      while ((pos = result.find(placeholder, pos)) != std::string::npos) {
+        result.replace(pos, placeholder.length(), value);
+        pos += value.length();
+      }
+    }
+
+    return result;
+  }
+
 public:
   std::string name;
   std::string version;
@@ -107,19 +158,30 @@ public:
   std::string libPath;
   std::vector<std::string> dependencies;
   std::string configInstructions;
-  std::string sha256;
+
+  std::unordered_map<std::string, std::string> sha256Map;
 
   static ThirdPartyLibrary from_json(const json &j) {
     ThirdPartyLibrary lib;
     lib.name = j.value("name", "");
     lib.version = j.value("version", "");
-    lib.system = j.value("system", "");
-    lib.arch = j.value("arch", "");
-    lib.downloadUrl = j.value("downloadUrl", "");
-    lib.includePath = j.value("includePath", "");
-    lib.libPath = j.value("libPath", "");
+
+    lib.system = detectSystem();
+    lib.arch = detectArch();
+
+    std::string rawUrl = j.value("downloadUrl", "");
+    lib.downloadUrl =
+        replacePlaceholders(rawUrl, lib.system, lib.arch, lib.version);
+
+    std::string rawIncludePath = j.value("includePath", "");
+    lib.includePath =
+        replacePlaceholders(rawIncludePath, lib.system, lib.arch, lib.version);
+
+    std::string rawLibPath = j.value("libPath", "");
+    lib.libPath =
+        replacePlaceholders(rawLibPath, lib.system, lib.arch, lib.version);
+
     lib.configInstructions = j.value("configInstructions", "");
-    lib.sha256 = j.value("sha256", "");
 
     if (j.contains("dependencies") && j["dependencies"].is_array()) {
       for (const auto &dep : j["dependencies"]) {
@@ -127,20 +189,105 @@ public:
       }
     }
 
+    if (j.contains("sha256") && j["sha256"].is_object()) {
+      for (const auto &[key, value] : j["sha256"].items()) {
+        if (value.is_string()) {
+          lib.sha256Map[key] = value.get<std::string>();
+        }
+      }
+    }
+
     return lib;
   }
 
+  static ThirdPartyLibrary from_json_with_platform(const json &j,
+                                                   const std::string &system,
+                                                   const std::string &arch) {
+    ThirdPartyLibrary lib;
+    lib.name = j.value("name", "");
+    lib.version = j.value("version", "");
+    lib.system = system;
+    lib.arch = arch;
+
+    std::string rawUrl = j.value("downloadUrl", "");
+    lib.downloadUrl = replacePlaceholders(rawUrl, system, arch, lib.version);
+
+    std::string rawIncludePath = j.value("includePath", "");
+    lib.includePath =
+        replacePlaceholders(rawIncludePath, system, arch, lib.version);
+
+    std::string rawLibPath = j.value("libPath", "");
+    lib.libPath = replacePlaceholders(rawLibPath, system, arch, lib.version);
+
+    lib.configInstructions = j.value("configInstructions", "");
+
+    if (j.contains("dependencies") && j["dependencies"].is_array()) {
+      for (const auto &dep : j["dependencies"]) {
+        lib.dependencies.push_back(dep.get<std::string>());
+      }
+    }
+
+    if (j.contains("sha256") && j["sha256"].is_object()) {
+      for (const auto &[key, value] : j["sha256"].items()) {
+        if (value.is_string()) {
+          lib.sha256Map[key] = value.get<std::string>();
+        }
+      }
+    }
+
+    return lib;
+  }
+
+  std::string getSha256() const {
+    std::string key = system + "-" + arch;
+    auto it = sha256Map.find(key);
+    if (it != sha256Map.end()) {
+      return it->second;
+    }
+    return "";
+  }
+
+  std::string getSha256ForPlatform(const std::string &targetSystem,
+                                   const std::string &targetArch) const {
+    std::string key = targetSystem + "-" + targetArch;
+    auto it = sha256Map.find(key);
+    if (it != sha256Map.end()) {
+      return it->second;
+    }
+    return "";
+  }
+
+  std::unordered_map<std::string, std::string> getAllSha256() const {
+    return sha256Map;
+  }
+
   json to_json() const {
-    return {{"name", name},
-            {"version", version},
-            {"system", system},
-            {"arch", arch},
-            {"downloadUrl", downloadUrl},
-            {"includePath", includePath},
-            {"libPath", libPath},
-            {"dependencies", dependencies},
-            {"configInstructions", configInstructions},
-            {"sha256", sha256}};
+    json result = {{"name", name},
+                   {"version", version},
+                   {"system", system},
+                   {"arch", arch},
+                   {"downloadUrl", downloadUrl},
+                   {"includePath", includePath},
+                   {"libPath", libPath},
+                   {"dependencies", dependencies},
+                   {"configInstructions", configInstructions}};
+
+    json sha256Json;
+    for (const auto &[key, value] : sha256Map) {
+      sha256Json[key] = value;
+    }
+    result["sha256"] = sha256Json;
+
+    return result;
+  }
+
+  static std::string getCurrentSystem() { return detectSystem(); }
+
+  static std::string getCurrentArch() { return detectArch(); }
+
+  bool isCurrentPlatformSupported() const {
+    std::string key = system + "-" + arch;
+    return sha256Map.find(key) != sha256Map.end();
   }
 };
 
@@ -2224,13 +2371,14 @@ public:
       return false;
     }
 
-    if (!lib.sha256.empty()) {
+    std::string expected_sha = lib.getSha256();
+    if (!expected_sha.empty()) {
       std::cout << "Verifying SHA256 checksum...\n";
       try {
         std::string calculated_sha = SHA256::hash_file(zip_file);
-        if (calculated_sha != lib.sha256) {
+        if (calculated_sha != expected_sha) {
           std::cerr << "SHA256 verification failed!\n";
-          std::cerr << "Expected: " << lib.sha256 << "\n";
+          std::cerr << "Expected: " << expected_sha << "\n";
           std::cerr << "Actual:   " << calculated_sha << "\n";
           fs::remove(zip_file);
           return false;
