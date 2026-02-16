@@ -1,4 +1,4 @@
-/*Created by Macintosh-MaiSensei on 2026/2/12.*/
+/*Created by Macintosh-MaiSensei on 2026/2/16.*/
 /*Version 1.0.4 Beta*/
 #include "yaml2json.hpp"
 #include <algorithm>
@@ -16,6 +16,7 @@
 #include <functional>
 #include <future>
 #include <iomanip>
+#include <iostream>
 #include <map>
 #include <memory>
 #include <mutex>
@@ -23,15 +24,13 @@
 #include <regex>
 #include <set>
 #include <sstream>
+#include <stdexcept>
 #include <string>
 #include <thread>
 #include <unistd.h>
 #include <unordered_map>
 #include <variant>
 #include <vector>
-#include <cstring>
-#include <iostream>
-#include <stdexcept>
 
 #include <json.hpp>
 #ifndef INCLUDE_NLOHMANN_JSON_HPP_
@@ -45,17 +44,16 @@ extern "C" {
 #define pclose _pclose
 #include <io.h>
 #include <process.h>
-#include <windows.h>
-#include <process.h>
 #include <shellapi.h>
 #include <tchar.h>
+#include <windows.h>
 #else
 #include <cstdio>
-#include <sys/types.h>
-#include <sys/wait.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <sys/stat.h>
+#include <sys/types.h>
+#include <sys/wait.h>
 #include <unistd.h>
 #endif
 
@@ -101,6 +99,9 @@ public:
 class ThirdPartyLibrary {
 public:
   std::string name;
+  std::string version;
+  std::string system;
+  std::string arch;
   std::string downloadUrl;
   std::string includePath;
   std::string libPath;
@@ -111,6 +112,9 @@ public:
   static ThirdPartyLibrary from_json(const json &j) {
     ThirdPartyLibrary lib;
     lib.name = j.value("name", "");
+    lib.version = j.value("version", "");
+    lib.system = j.value("system", "");
+    lib.arch = j.value("arch", "");
     lib.downloadUrl = j.value("downloadUrl", "");
     lib.includePath = j.value("includePath", "");
     lib.libPath = j.value("libPath", "");
@@ -128,6 +132,9 @@ public:
 
   json to_json() const {
     return {{"name", name},
+            {"version", version},
+            {"system", system},
+            {"arch", arch},
             {"downloadUrl", downloadUrl},
             {"includePath", includePath},
             {"libPath", libPath},
@@ -137,11 +144,10 @@ public:
   }
 };
 
-
 namespace Constants {
 const std::string VERSION = "1.0.4";
 const std::string DEFAULT_PROJECT_NAME = "project";
-const std::string DEFAULT_LIBRARY_MIRROR = ""; 
+const std::string DEFAULT_LIBRARY_MIRROR = "";
 const std::string LIBRARY_INFO_FILENAME = "libraries";
 
 const std::unordered_map<std::string, CompilerType> COMPILER_TYPE_MAP = {
@@ -153,7 +159,7 @@ const std::unordered_map<std::string, DebuggerType> DEBUGGER_TYPE_MAP = {
     {"gdb", DebuggerType::GDB},
     {"lldb", DebuggerType::LLDB},
     {"cppvsdbg", DebuggerType::CPPVSDBG}};
-} 
+} // namespace Constants
 
 class SHA256 {
 private:
@@ -205,7 +211,6 @@ private:
   void transform(const uint8_t *data) {
     std::array<uint32_t, 64> W = {0};
 
-    
     for (int i = 0; i < 16; i++) {
       W[i] = (static_cast<uint32_t>(data[i * 4]) << 24) |
              (static_cast<uint32_t>(data[i * 4 + 1]) << 16) |
@@ -213,7 +218,6 @@ private:
              (static_cast<uint32_t>(data[i * 4 + 3]));
     }
 
-    
     for (int i = 16; i < 64; i++) {
       W[i] = gamma1(W[i - 2]) + W[i - 7] + gamma0(W[i - 15]) + W[i - 16];
     }
@@ -227,7 +231,6 @@ private:
     auto g = state[6];
     auto h = state[7];
 
-    
     for (int i = 0; i < 64; i++) {
       uint32_t T1 = h + sigma1(e) + ch(e, f, g) + K[i] + W[i];
       uint32_t T2 = sigma0(a) + maj(a, b, c);
@@ -269,31 +272,29 @@ public:
       total_bytes += bytes_read;
 
       if (bytes_read < 64) {
-        
-        buffer[bytes_read] = 0x80; 
 
-        
+        buffer[bytes_read] = 0x80;
+
         if (bytes_read >= 56) {
-          
+
           for (size_t i = bytes_read + 1; i < 64; i++) {
             buffer[i] = 0;
           }
           sha.transform(buffer.data());
 
-          
           buffer.fill(0);
-          
+
           uint64_t bit_length = total_bytes * 8;
           for (int i = 0; i < 8; i++) {
             buffer[63 - i] = static_cast<uint8_t>(bit_length >> (i * 8));
           }
           sha.transform(buffer.data());
         } else {
-          
+
           for (size_t i = bytes_read + 1; i < 56; i++) {
             buffer[i] = 0;
           }
-          
+
           uint64_t bit_length = total_bytes * 8;
           for (int i = 0; i < 8; i++) {
             buffer[63 - i] = static_cast<uint8_t>(bit_length >> (i * 8));
@@ -302,12 +303,11 @@ public:
         }
         processed_last_block = true;
       } else {
-        
+
         sha.transform(buffer.data());
       }
     }
 
-    
     std::ostringstream result;
     result << std::hex << std::setfill('0');
     for (uint32_t val : sha.state) {
@@ -320,509 +320,547 @@ public:
 
 class SafeCommandExecutor {
 public:
-    static std::string execute(const std::vector<std::string> &args) {
-        return CommandService::execute(args);
-    }
-    
-    static bool download_file(const std::string &url, const fs::path &output_path) {
-        return CommandService::download_file(url, output_path);
-    }
-    
-    static bool unzip_file(const fs::path &zip_file, const fs::path &output_dir) {
-        return CommandService::unzip_file(zip_file, output_dir);
-    }
-    
-    static bool safe_create_directory(const fs::path &path) {
-        return FileUtils::safe_create_directory(path);
-    }
-    
-    static bool is_valid_url(const std::string &url) {
-        return FileUtils::is_valid_url(url);
-    }
-    
+  static std::string execute(const std::vector<std::string> &args) {
+    return CommandService::execute(args);
+  }
+
+  static bool download_file(const std::string &url,
+                            const fs::path &output_path) {
+    return CommandService::download_file(url, output_path);
+  }
+
+  static bool unzip_file(const fs::path &zip_file, const fs::path &output_dir) {
+    return CommandService::unzip_file(zip_file, output_dir);
+  }
+
+  static bool safe_create_directory(const fs::path &path) {
+    return FileUtils::safe_create_directory(path);
+  }
+
+  static bool is_valid_url(const std::string &url) {
+    return FileUtils::is_valid_url(url);
+  }
+
 private:
-    struct FileUtils {
-        static bool safe_create_directory(const fs::path &path) {
-            try {
-                if (!fs::exists(path)) {
-                    std::error_code ec;
-                    bool created = fs::create_directories(path, ec);
-                    if (!created || ec) {
-                        std::cerr << "Failed to create directory " << path << ": "
-                                  << ec.message() << std::endl;
-                        return false;
-                    }
-                }
-                return true;
-            } catch (const fs::filesystem_error &e) {
-                std::cerr << "Error creating directory: " << e.what() << std::endl;
-                return false;
-            }
-        }
-        
-        static bool is_valid_url(const std::string &url) {
-            try {
-                if (url.find("http://") != 0 && url.find("https://") != 0) {
-                    return false;
-                }
-                
-                for (char c : url) {
-                    if (std::isspace(c) || c < 0x20) {
-                        return false;
-                    }
-                }
-                
-                if (url.find("..") != std::string::npos ||
-                    url.find(";") != std::string::npos ||
-                    url.find("|") != std::string::npos ||
-                    url.find("`") != std::string::npos ||
-                    url.find("$") != std::string::npos ||
-                    url.find("(") != std::string::npos ||
-                    url.find(")") != std::string::npos) {
-                    return false;
-                }
-                
-                if (url.find("https://github.com/") == 0 ||
-                    url.find("https://archives.boost.io/") == 0 ||
-                    url.find("https://www.libsdl.org/") == 0) {
-                    return true;
-                }
-                
-                static const std::regex domain_regex(
-                    R"(^(?:[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}$)");
-                
-                size_t start = url.find("://") + 3;
-                size_t end = url.find('/', start);
-                if (end == std::string::npos) {
-                    end = url.length();
-                }
-                
-                std::string domain = url.substr(start, end - start);
-                size_t port_pos = domain.find(':');
-                if (port_pos != std::string::npos) {
-                    domain = domain.substr(0, port_pos);
-                }
-                
-                return std::regex_match(domain, domain_regex);
-            } catch (const std::exception &e) {
-                std::cerr << "URL validation error: " << e.what() << "\n";
-                return false;
-            }
-        }
-    };
-    
-    struct LibcurlDownloader {
-    private:
-        static size_t write_data(void* ptr, size_t size, size_t nmemb, FILE* stream) {
-            size_t written = fwrite(ptr, size, nmemb, stream);
-            return written;
-        }
-        
-        static int progress_callback(void* clientp, curl_off_t dltotal, curl_off_t dlnow, curl_off_t ultotal, curl_off_t ulnow) {
-            if (dltotal > 0) {
-                double percent = static_cast<double>(dlnow) / dltotal * 100.0;
-                std::cout << "\rDownload progress: " << static_cast<int>(percent) << "% ("
-                          << dlnow << "/" << dltotal << " bytes)";
-                std::cout.flush();
-            }
-            return 0;
-        }
-        
-    public:
-        static bool download(const std::string& url, const fs::path& output_path) {
-            CURL* curl = curl_easy_init();
-            if (!curl) {
-                std::cerr << "Failed to initialize libcurl" << std::endl;
-                return false;
-            }
-            
-            FILE* fp = fopen(output_path.string().c_str(), "wb");
-            if (!fp) {
-                std::cerr << "Failed to open file for writing: " << output_path << std::endl;
-                curl_easy_cleanup(curl);
-                return false;
-            }
-            
-            bool success = false;
-            
-            curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
-            curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, write_data);
-            curl_easy_setopt(curl, CURLOPT_WRITEDATA, fp);
-            curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
-            curl_easy_setopt(curl, CURLOPT_MAXREDIRS, 10L);
-            curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, 30L);
-            curl_easy_setopt(curl, CURLOPT_TIMEOUT, 300L);
-            curl_easy_setopt(curl, CURLOPT_NOPROGRESS, 0L);
-            curl_easy_setopt(curl, CURLOPT_XFERINFOFUNCTION, progress_callback);
-            curl_easy_setopt(curl, CURLOPT_FAILONERROR, 1L);
-            curl_easy_setopt(curl, CURLOPT_USERAGENT, "SafeCommandExecutor/1.0");
-            
-            CURLcode res = curl_easy_perform(curl);
-            
-            if (res == CURLE_OK) {
-                long response_code;
-                curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &response_code);
-                
-                if (response_code >= 200 && response_code < 300) {
-                    curl_off_t dl_size;
-                    curl_easy_getinfo(curl, CURLINFO_SIZE_DOWNLOAD_T, &dl_size);
-                    std::cout << "\nDownload successful. Downloaded " << dl_size << " bytes" << std::endl;
-                    success = true;
-                } else {
-                    std::cerr << "\nHTTP error: " << response_code << std::endl;
-                }
-            } else {
-                std::cerr << "\nDownload failed: " << curl_easy_strerror(res) << std::endl;
-            }
-            
-            fclose(fp);
-            curl_easy_cleanup(curl);
-            
-            if (!success && fs::exists(output_path)) {
-                std::error_code ec;
-                fs::remove(output_path, ec);
-                if (ec) {
-                    std::cerr << "Failed to remove partial download: " << ec.message() << std::endl;
-                }
-            }
-            
-            return success;
-        }
-    };
-    
-    struct IPlatformExecutor {
-        virtual ~IPlatformExecutor() = default;
-        virtual std::string execute(const std::vector<std::string>& args) = 0;
-        virtual bool is_command_available(const std::string& command) = 0;
-        virtual bool is_safe_argument(const std::string& arg) = 0;
-    };
-    
-#ifdef _WIN32
-    struct WindowsExecutor : public IPlatformExecutor {
-        std::string execute(const std::vector<std::string>& args) override {
-            if (args.empty()) {
-                throw std::invalid_argument("No command to execute");
-            }
-            
-            std::string command_line;
-            for (size_t i = 0; i < args.size(); ++i) {
-                if (i > 0) command_line += " ";
-                if (args[i].find(' ') != std::string::npos || args[i].find('\t') != std::string::npos) {
-                    command_line += "\"" + args[i] + "\"";
-                } else {
-                    command_line += args[i];
-                }
-            }
-            command_line += " 2>&1";
-            
-            std::array<char, 128> buffer;
-            std::string result;
-            FILE* pipe = _popen(command_line.c_str(), "r");
-            
-            if (!pipe) {
-                throw std::runtime_error("_popen() failed!");
-            }
-            
-            try {
-                while (fgets(buffer.data(), static_cast<int>(buffer.size()), pipe) != nullptr) {
-                    result += buffer.data();
-                }
-            } catch (...) {
-                _pclose(pipe);
-                throw;
-            }
-            
-            int return_code = _pclose(pipe);
-            if (return_code != 0) {
-                throw std::runtime_error(
-                    "Command failed with exit code: " + std::to_string(return_code) +
-                    "\nOutput: " + result);
-            }
-            
-            return result;
-        }
-        
-        bool is_command_available(const std::string& command) override {
-            std::string check_cmd = "where " + command + " >nul 2>nul";
-            int result = std::system(check_cmd.c_str());
-            return result == 0;
-        }
-        
-        bool is_safe_argument(const std::string& arg) override {
-            if (arg.empty()) return false;
-            const std::string dangerous_chars = ";&|`$><!*?{}[]()^%";
-            for (char c : dangerous_chars) {
-                if (arg.find(c) != std::string::npos) return false;
-            }
-            if (arg.find("..") != std::string::npos) return false;
-            if (arg.find('\n') != std::string::npos || arg.find('\r') != std::string::npos) return false;
-            return true;
-        }
-    };
-#endif
-    
-#ifndef _WIN32
-    struct PosixExecutor : public IPlatformExecutor {
-        std::string execute(const std::vector<std::string>& args) override {
-            if (args.empty()) {
-                throw std::invalid_argument("No command to execute");
-            }
-            
-            std::vector<char*> argv;
-            for (const auto& arg : args) {
-                argv.push_back(const_cast<char*>(arg.c_str()));
-            }
-            argv.push_back(nullptr);
-            
-            int pipefd[2];
-            if (pipe(pipefd) == -1) {
-                throw std::runtime_error("Failed to create pipe: " + std::string(strerror(errno)));
-            }
-            
-            pid_t pid = fork();
-            if (pid == -1) {
-                close(pipefd[0]);
-                close(pipefd[1]);
-                throw std::runtime_error("Failed to fork process: " + std::string(strerror(errno)));
-            }
-            
-            if (pid == 0) {
-                close(pipefd[0]);
-                if (dup2(pipefd[1], STDOUT_FILENO) == -1) { perror("dup2 stdout"); exit(EXIT_FAILURE); }
-                if (dup2(pipefd[1], STDERR_FILENO) == -1) { perror("dup2 stderr"); exit(EXIT_FAILURE); }
-                close(pipefd[1]);
-                
-                if (setgid(getgid()) != 0 || setuid(getuid()) != 0) {
-                    perror("setgid/setuid");
-                    exit(EXIT_FAILURE);
-                }
-                
-                execvp(argv[0], argv.data());
-                std::cerr << "Failed to execute command: " << argv[0] << " - " << strerror(errno) << std::endl;
-                exit(EXIT_FAILURE);
-            }
-            
-            close(pipefd[1]);
-            std::string result;
-            char buffer[4096];
-            ssize_t count;
-            
-            while ((count = read(pipefd[0], buffer, sizeof(buffer) - 1)) > 0) {
-                buffer[count] = '\0';
-                result.append(buffer, count);
-            }
-            
-            if (count == -1 && errno != EINTR) {
-                close(pipefd[0]);
-                throw std::runtime_error("Error reading from pipe: " + std::string(strerror(errno)));
-            }
-            
-            close(pipefd[0]);
-            
-            int status;
-            do {
-                if (waitpid(pid, &status, 0) == -1) {
-                    if (errno == EINTR) continue;
-                    throw std::runtime_error("waitpid failed: " + std::string(strerror(errno)));
-                }
-            } while (!WIFEXITED(status) && !WIFSIGNALED(status));
-            
-            if (WIFEXITED(status) && WEXITSTATUS(status) != 0) {
-                throw std::runtime_error("Command exited with non-zero status: " +
-                                         std::to_string(WEXITSTATUS(status)) + "\nOutput: " + result);
-            }
-            
-            if (WIFSIGNALED(status)) {
-                throw std::runtime_error("Command terminated by signal: " + std::to_string(WTERMSIG(status)));
-            }
-            
-            return result;
-        }
-        
-        bool is_command_available(const std::string& command) override {
-            std::string check_cmd = "which " + command + " >/dev/null 2>&1";
-            int result = std::system(check_cmd.c_str());
-            return result == 0;
-        }
-        
-        bool is_safe_argument(const std::string& arg) override {
-            if (arg.empty()) return false;
-            const std::string dangerous_chars = ";&|`$><!*?{}[]()~";
-            for (char c : dangerous_chars) {
-                if (arg.find(c) != std::string::npos) return false;
-            }
-            if (arg.find("..") != std::string::npos) return false;
-            if (arg.find('\n') != std::string::npos || arg.find('\r') != std::string::npos) return false;
-            return true;
-        }
-    };
-#endif
-    
-    struct ExecutorFactory {
-        static IPlatformExecutor* create() {
-#ifdef _WIN32
-            return new WindowsExecutor();
-#else
-            return new PosixExecutor();
-#endif
-        }
-    };
-    
-    struct CommandService {
-        static std::string execute(const std::vector<std::string> &args) {
-            if (args.empty()) {
-                throw std::invalid_argument("Command arguments cannot be empty");
-            }
-            
-            std::unique_ptr<IPlatformExecutor> executor(ExecutorFactory::create());
-            
-            for (const auto &arg : args) {
-                if (!executor->is_safe_argument(arg)) {
-                    throw std::runtime_error("Unsafe argument detected: " + arg);
-                }
-            }
-            
-            std::string command_str;
-            for (const auto &arg : args) {
-                command_str += arg + " ";
-            }
-            std::cout << "Executing safe command: " << command_str << std::endl;
-            
-            return executor->execute(args);
-        }
-        
-        static bool download_file(const std::string &url, const fs::path &output_path) {
-            std::unique_ptr<IPlatformExecutor> executor(ExecutorFactory::create());
-            
-            if (!FileUtils::is_valid_url(url)) {
-                throw std::invalid_argument("Invalid URL format: " + url);
-            }
-            
-            if (output_path.empty() || output_path.is_relative()) {
-                throw std::invalid_argument("Output path must be absolute");
-            }
-            
-            if (output_path.string().find("..") != std::string::npos) {
-                throw std::invalid_argument("Output path contains parent directory traversal");
-            }
-            
-            if (!FileUtils::safe_create_directory(output_path.parent_path())) {
-                throw std::runtime_error("Failed to create output directory");
-            }
-            
-            std::cout << "Downloading from: " << url << std::endl;
-            std::cout << "Saving to: " << output_path << std::endl;
-            
-            bool success = LibcurlDownloader::download(url, output_path);
-            
-            if (success) {
-                if (fs::exists(output_path)) {
-                    std::error_code ec;
-                    auto file_size = fs::file_size(output_path, ec);
-                    if (!ec && file_size > 0) {
-                        std::cout << "Download completed successfully. File size: " 
-                                  << file_size << " bytes" << std::endl;
-                        return true;
-                    } else if (ec) {
-                        std::cerr << "Failed to get file size: " << ec.message() << std::endl;
-                        return false;
-                    } else if (file_size == 0) {
-                        std::cerr << "Downloaded file is empty" << std::endl;
-                        return false;
-                    }
-                }
-            }
-            
+  struct FileUtils {
+    static bool safe_create_directory(const fs::path &path) {
+      try {
+        if (!fs::exists(path)) {
+          std::error_code ec;
+          bool created = fs::create_directories(path, ec);
+          if (!created || ec) {
+            std::cerr << "Failed to create directory " << path << ": "
+                      << ec.message() << std::endl;
             return false;
+          }
         }
-        
-        static bool unzip_file(const fs::path &zip_file, const fs::path &output_dir) {
-            std::unique_ptr<IPlatformExecutor> executor(ExecutorFactory::create());
-            
-            if (!fs::exists(zip_file) || !fs::is_regular_file(zip_file)) {
-                throw std::invalid_argument("Invalid zip file: " + zip_file.string());
-            }
-            
-            if (!FileUtils::safe_create_directory(output_dir)) {
-                throw std::invalid_argument("Failed to create output directory: " +
-                                            output_dir.string());
-            }
-            
-            if (zip_file.string().find("..") != std::string::npos ||
-                output_dir.string().find("..") != std::string::npos) {
-                throw std::invalid_argument("Path contains parent directory traversal");
-            }
-            
-            std::vector<std::string> args;
+        return true;
+      } catch (const fs::filesystem_error &e) {
+        std::cerr << "Error creating directory: " << e.what() << std::endl;
+        return false;
+      }
+    }
+
+    static bool is_valid_url(const std::string &url) {
+      try {
+        if (url.find("http://") != 0 && url.find("https://") != 0) {
+          return false;
+        }
+
+        for (char c : url) {
+          if (std::isspace(c) || c < 0x20) {
+            return false;
+          }
+        }
+
+        if (url.find("..") != std::string::npos ||
+            url.find(";") != std::string::npos ||
+            url.find("|") != std::string::npos ||
+            url.find("`") != std::string::npos ||
+            url.find("$") != std::string::npos ||
+            url.find("(") != std::string::npos ||
+            url.find(")") != std::string::npos) {
+          return false;
+        }
+
+        if (url.find("https://github.com/") == 0 ||
+            url.find("https://archives.boost.io/") == 0 ||
+            url.find("https://www.libsdl.org/") == 0) {
+          return true;
+        }
+
+        static const std::regex domain_regex(
+            R"(^(?:[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}$)");
+
+        size_t start = url.find("://") + 3;
+        size_t end = url.find('/', start);
+        if (end == std::string::npos) {
+          end = url.length();
+        }
+
+        std::string domain = url.substr(start, end - start);
+        size_t port_pos = domain.find(':');
+        if (port_pos != std::string::npos) {
+          domain = domain.substr(0, port_pos);
+        }
+
+        return std::regex_match(domain, domain_regex);
+      } catch (const std::exception &e) {
+        std::cerr << "URL validation error: " << e.what() << "\n";
+        return false;
+      }
+    }
+  };
+
+  struct LibcurlDownloader {
+  private:
+    static size_t write_data(void *ptr, size_t size, size_t nmemb,
+                             FILE *stream) {
+      size_t written = fwrite(ptr, size, nmemb, stream);
+      return written;
+    }
+
+    static int progress_callback(void *clientp, curl_off_t dltotal,
+                                 curl_off_t dlnow, curl_off_t ultotal,
+                                 curl_off_t ulnow) {
+      if (dltotal > 0) {
+        double percent = static_cast<double>(dlnow) / dltotal * 100.0;
+        std::cout << "\rDownload progress: " << static_cast<int>(percent)
+                  << "% (" << dlnow << "/" << dltotal << " bytes)";
+        std::cout.flush();
+      }
+      return 0;
+    }
+
+  public:
+    static bool download(const std::string &url, const fs::path &output_path) {
+      CURL *curl = curl_easy_init();
+      if (!curl) {
+        std::cerr << "Failed to initialize libcurl" << std::endl;
+        return false;
+      }
+
+      FILE *fp = fopen(output_path.string().c_str(), "wb");
+      if (!fp) {
+        std::cerr << "Failed to open file for writing: " << output_path
+                  << std::endl;
+        curl_easy_cleanup(curl);
+        return false;
+      }
+
+      bool success = false;
+
+      curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
+      curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, write_data);
+      curl_easy_setopt(curl, CURLOPT_WRITEDATA, fp);
+      curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
+      curl_easy_setopt(curl, CURLOPT_MAXREDIRS, 10L);
+      curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, 30L);
+      curl_easy_setopt(curl, CURLOPT_TIMEOUT, 300L);
+      curl_easy_setopt(curl, CURLOPT_NOPROGRESS, 0L);
+      curl_easy_setopt(curl, CURLOPT_XFERINFOFUNCTION, progress_callback);
+      curl_easy_setopt(curl, CURLOPT_FAILONERROR, 1L);
+      curl_easy_setopt(curl, CURLOPT_USERAGENT, "SafeCommandExecutor/1.0");
+
+      CURLcode res = curl_easy_perform(curl);
+
+      if (res == CURLE_OK) {
+        long response_code;
+        curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &response_code);
+
+        if (response_code >= 200 && response_code < 300) {
+          curl_off_t dl_size;
+          curl_easy_getinfo(curl, CURLINFO_SIZE_DOWNLOAD_T, &dl_size);
+          std::cout << "\nDownload successful. Downloaded " << dl_size
+                    << " bytes" << std::endl;
+          success = true;
+        } else {
+          std::cerr << "\nHTTP error: " << response_code << std::endl;
+        }
+      } else {
+        std::cerr << "\nDownload failed: " << curl_easy_strerror(res)
+                  << std::endl;
+      }
+
+      fclose(fp);
+      curl_easy_cleanup(curl);
+
+      if (!success && fs::exists(output_path)) {
+        std::error_code ec;
+        fs::remove(output_path, ec);
+        if (ec) {
+          std::cerr << "Failed to remove partial download: " << ec.message()
+                    << std::endl;
+        }
+      }
+
+      return success;
+    }
+  };
+
+  struct IPlatformExecutor {
+    virtual ~IPlatformExecutor() = default;
+    virtual std::string execute(const std::vector<std::string> &args) = 0;
+    virtual bool is_command_available(const std::string &command) = 0;
+    virtual bool is_safe_argument(const std::string &arg) = 0;
+  };
+
 #ifdef _WIN32
-            if (!executor->is_command_available("powershell")) {
-                throw std::runtime_error("powershell command is not available.");
-            }
-            
-            args = {
-                "powershell",      "-Command",         "Expand-Archive",    "-Path",
-                zip_file.string(), "-DestinationPath", output_dir.string(), "-Force"
-            };
-#else
-            if (!executor->is_command_available("unzip")) {
-                throw std::runtime_error(
-                    "unzip command is not available. Please install unzip first.");
-            }
-            
-            args = {"unzip", "-o", zip_file.string(), "-d", output_dir.string()};
-#endif
-            
-            try {
-                std::string result = execute(args);
-                
-                bool has_files = false;
-                for (const auto &entry : fs::directory_iterator(output_dir)) {
-                    has_files = true;
-                    break;
-                }
-                
-                if (has_files) {
-                    std::cout << "Unzip successful. Files extracted to: " << output_dir
-                              << std::endl;
-                    return true;
-                } else {
-                    std::cerr << "Unzip completed but no files found in output directory"
-                              << std::endl;
-                    return false;
-                }
-                
-            } catch (const std::exception &e) {
-                std::cerr << "Unzip failed: " << e.what() << std::endl;
-                return false;
-            }
+  struct WindowsExecutor : public IPlatformExecutor {
+    std::string execute(const std::vector<std::string> &args) override {
+      if (args.empty()) {
+        throw std::invalid_argument("No command to execute");
+      }
+
+      std::string command_line;
+      for (size_t i = 0; i < args.size(); ++i) {
+        if (i > 0)
+          command_line += " ";
+        if (args[i].find(' ') != std::string::npos ||
+            args[i].find('\t') != std::string::npos) {
+          command_line += "\"" + args[i] + "\"";
+        } else {
+          command_line += args[i];
         }
-    };
+      }
+      command_line += " 2>&1";
+
+      std::array<char, 128> buffer;
+      std::string result;
+      FILE *pipe = _popen(command_line.c_str(), "r");
+
+      if (!pipe) {
+        throw std::runtime_error("_popen() failed!");
+      }
+
+      try {
+        while (fgets(buffer.data(), static_cast<int>(buffer.size()), pipe) !=
+               nullptr) {
+          result += buffer.data();
+        }
+      } catch (...) {
+        _pclose(pipe);
+        throw;
+      }
+
+      int return_code = _pclose(pipe);
+      if (return_code != 0) {
+        throw std::runtime_error(
+            "Command failed with exit code: " + std::to_string(return_code) +
+            "\nOutput: " + result);
+      }
+
+      return result;
+    }
+
+    bool is_command_available(const std::string &command) override {
+      std::string check_cmd = "where " + command + " >nul 2>nul";
+      int result = std::system(check_cmd.c_str());
+      return result == 0;
+    }
+
+    bool is_safe_argument(const std::string &arg) override {
+      if (arg.empty())
+        return false;
+      const std::string dangerous_chars = ";&|`$><!*?{}[]()^%";
+      for (char c : dangerous_chars) {
+        if (arg.find(c) != std::string::npos)
+          return false;
+      }
+      if (arg.find("..") != std::string::npos)
+        return false;
+      if (arg.find('\n') != std::string::npos ||
+          arg.find('\r') != std::string::npos)
+        return false;
+      return true;
+    }
+  };
+#endif
+
+#ifndef _WIN32
+  struct PosixExecutor : public IPlatformExecutor {
+    std::string execute(const std::vector<std::string> &args) override {
+      if (args.empty()) {
+        throw std::invalid_argument("No command to execute");
+      }
+
+      std::vector<char *> argv;
+      for (const auto &arg : args) {
+        argv.push_back(const_cast<char *>(arg.c_str()));
+      }
+      argv.push_back(nullptr);
+
+      int pipefd[2];
+      if (pipe(pipefd) == -1) {
+        throw std::runtime_error("Failed to create pipe: " +
+                                 std::string(strerror(errno)));
+      }
+
+      pid_t pid = fork();
+      if (pid == -1) {
+        close(pipefd[0]);
+        close(pipefd[1]);
+        throw std::runtime_error("Failed to fork process: " +
+                                 std::string(strerror(errno)));
+      }
+
+      if (pid == 0) {
+        close(pipefd[0]);
+        if (dup2(pipefd[1], STDOUT_FILENO) == -1) {
+          perror("dup2 stdout");
+          exit(EXIT_FAILURE);
+        }
+        if (dup2(pipefd[1], STDERR_FILENO) == -1) {
+          perror("dup2 stderr");
+          exit(EXIT_FAILURE);
+        }
+        close(pipefd[1]);
+
+        if (setgid(getgid()) != 0 || setuid(getuid()) != 0) {
+          perror("setgid/setuid");
+          exit(EXIT_FAILURE);
+        }
+
+        execvp(argv[0], argv.data());
+        std::cerr << "Failed to execute command: " << argv[0] << " - "
+                  << strerror(errno) << std::endl;
+        exit(EXIT_FAILURE);
+      }
+
+      close(pipefd[1]);
+      std::string result;
+      char buffer[4096];
+      ssize_t count;
+
+      while ((count = read(pipefd[0], buffer, sizeof(buffer) - 1)) > 0) {
+        buffer[count] = '\0';
+        result.append(buffer, count);
+      }
+
+      if (count == -1 && errno != EINTR) {
+        close(pipefd[0]);
+        throw std::runtime_error("Error reading from pipe: " +
+                                 std::string(strerror(errno)));
+      }
+
+      close(pipefd[0]);
+
+      int status;
+      do {
+        if (waitpid(pid, &status, 0) == -1) {
+          if (errno == EINTR)
+            continue;
+          throw std::runtime_error("waitpid failed: " +
+                                   std::string(strerror(errno)));
+        }
+      } while (!WIFEXITED(status) && !WIFSIGNALED(status));
+
+      if (WIFEXITED(status) && WEXITSTATUS(status) != 0) {
+        throw std::runtime_error("Command exited with non-zero status: " +
+                                 std::to_string(WEXITSTATUS(status)) +
+                                 "\nOutput: " + result);
+      }
+
+      if (WIFSIGNALED(status)) {
+        throw std::runtime_error("Command terminated by signal: " +
+                                 std::to_string(WTERMSIG(status)));
+      }
+
+      return result;
+    }
+
+    bool is_command_available(const std::string &command) override {
+      std::string check_cmd = "which " + command + " >/dev/null 2>&1";
+      int result = std::system(check_cmd.c_str());
+      return result == 0;
+    }
+
+    bool is_safe_argument(const std::string &arg) override {
+      if (arg.empty())
+        return false;
+      const std::string dangerous_chars = ";&|`$><!*?{}[]()~";
+      for (char c : dangerous_chars) {
+        if (arg.find(c) != std::string::npos)
+          return false;
+      }
+      if (arg.find("..") != std::string::npos)
+        return false;
+      if (arg.find('\n') != std::string::npos ||
+          arg.find('\r') != std::string::npos)
+        return false;
+      return true;
+    }
+  };
+#endif
+
+  struct ExecutorFactory {
+    static IPlatformExecutor *create() {
+#ifdef _WIN32
+      return new WindowsExecutor();
+#else
+      return new PosixExecutor();
+#endif
+    }
+  };
+
+  struct CommandService {
+    static std::string execute(const std::vector<std::string> &args) {
+      if (args.empty()) {
+        throw std::invalid_argument("Command arguments cannot be empty");
+      }
+
+      std::unique_ptr<IPlatformExecutor> executor(ExecutorFactory::create());
+
+      for (const auto &arg : args) {
+        if (!executor->is_safe_argument(arg)) {
+          throw std::runtime_error("Unsafe argument detected: " + arg);
+        }
+      }
+
+      std::string command_str;
+      for (const auto &arg : args) {
+        command_str += arg + " ";
+      }
+      std::cout << "Executing safe command: " << command_str << std::endl;
+
+      return executor->execute(args);
+    }
+
+    static bool download_file(const std::string &url,
+                              const fs::path &output_path) {
+      std::unique_ptr<IPlatformExecutor> executor(ExecutorFactory::create());
+
+      if (!FileUtils::is_valid_url(url)) {
+        throw std::invalid_argument("Invalid URL format: " + url);
+      }
+
+      if (output_path.empty() || output_path.is_relative()) {
+        throw std::invalid_argument("Output path must be absolute");
+      }
+
+      if (output_path.string().find("..") != std::string::npos) {
+        throw std::invalid_argument(
+            "Output path contains parent directory traversal");
+      }
+
+      if (!FileUtils::safe_create_directory(output_path.parent_path())) {
+        throw std::runtime_error("Failed to create output directory");
+      }
+
+      std::cout << "Downloading from: " << url << std::endl;
+      std::cout << "Saving to: " << output_path << std::endl;
+
+      bool success = LibcurlDownloader::download(url, output_path);
+
+      if (success) {
+        if (fs::exists(output_path)) {
+          std::error_code ec;
+          auto file_size = fs::file_size(output_path, ec);
+          if (!ec && file_size > 0) {
+            std::cout << "Download completed successfully. File size: "
+                      << file_size << " bytes" << std::endl;
+            return true;
+          } else if (ec) {
+            std::cerr << "Failed to get file size: " << ec.message()
+                      << std::endl;
+            return false;
+          } else if (file_size == 0) {
+            std::cerr << "Downloaded file is empty" << std::endl;
+            return false;
+          }
+        }
+      }
+
+      return false;
+    }
+
+    static bool unzip_file(const fs::path &zip_file,
+                           const fs::path &output_dir) {
+      std::unique_ptr<IPlatformExecutor> executor(ExecutorFactory::create());
+
+      if (!fs::exists(zip_file) || !fs::is_regular_file(zip_file)) {
+        throw std::invalid_argument("Invalid zip file: " + zip_file.string());
+      }
+
+      if (!FileUtils::safe_create_directory(output_dir)) {
+        throw std::invalid_argument("Failed to create output directory: " +
+                                    output_dir.string());
+      }
+
+      if (zip_file.string().find("..") != std::string::npos ||
+          output_dir.string().find("..") != std::string::npos) {
+        throw std::invalid_argument("Path contains parent directory traversal");
+      }
+
+      std::vector<std::string> args;
+#ifdef _WIN32
+      if (!executor->is_command_available("powershell")) {
+        throw std::runtime_error("powershell command is not available.");
+      }
+
+      args = {
+          "powershell",      "-Command",         "Expand-Archive",    "-Path",
+          zip_file.string(), "-DestinationPath", output_dir.string(), "-Force"};
+#else
+      if (!executor->is_command_available("unzip")) {
+        throw std::runtime_error(
+            "unzip command is not available. Please install unzip first.");
+      }
+
+      args = {"unzip", "-o", zip_file.string(), "-d", output_dir.string()};
+#endif
+
+      try {
+        std::string result = execute(args);
+
+        bool has_files = false;
+        for (const auto &entry : fs::directory_iterator(output_dir)) {
+          has_files = true;
+          break;
+        }
+
+        if (has_files) {
+          std::cout << "Unzip successful. Files extracted to: " << output_dir
+                    << std::endl;
+          return true;
+        } else {
+          std::cerr << "Unzip completed but no files found in output directory"
+                    << std::endl;
+          return false;
+        }
+
+      } catch (const std::exception &e) {
+        std::cerr << "Unzip failed: " << e.what() << std::endl;
+        return false;
+      }
+    }
+  };
 };
 
 class Utils {
 public:
-  
   static std::string clean_path(const std::string &input) {
     std::string cleaned = input;
 
     cleaned.erase(0, cleaned.find_first_not_of(" \t\r\n"));
     cleaned.erase(cleaned.find_last_not_of(" \t\r\n") + 1);
-    
-    while (!cleaned.empty() && (cleaned.front() == '\'' || cleaned.front() == '"'))
-        cleaned.erase(0, 1);
-    while (!cleaned.empty() && (cleaned.back() == '\'' || cleaned.back() == '"'))
-        cleaned.pop_back();
+
+    while (!cleaned.empty() &&
+           (cleaned.front() == '\'' || cleaned.front() == '"'))
+      cleaned.erase(0, 1);
+    while (!cleaned.empty() &&
+           (cleaned.back() == '\'' || cleaned.back() == '"'))
+      cleaned.pop_back();
 
     std::replace(cleaned.begin(), cleaned.end(), '\\', '/');
 
     if (!cleaned.empty() && cleaned.back() == '/' && cleaned.size() > 1) {
-        cleaned.pop_back();
+      cleaned.pop_back();
     }
 
     return cleaned;
   }
 
-  
   static std::string get_valid_name(const std::string &input) {
     if (input.find_first_of(";&|<>`$()") != std::string::npos) {
       throw std::invalid_argument("Invalid characters in project name");
@@ -836,190 +874,203 @@ public:
                               }),
                name.end());
 
-    
     std::replace(name.begin(), name.end(), ' ', '-');
 
-    
     std::transform(name.begin(), name.end(), name.begin(),
                    [](unsigned char c) { return std::tolower(c); });
 
     return name;
   }
 
-static bool is_standard_supported(const CompilerConfig& compiler,
-                                        const std::string& standard) {
+  static bool is_standard_supported(const CompilerConfig &compiler,
+                                    const std::string &standard) {
     static std::mutex cache_mutex;
-    static std::map<std::tuple<CompilerType, std::string, int, int, int>, bool> cache;
-    
+    static std::map<std::tuple<CompilerType, std::string, int, int, int>, bool>
+        cache;
+
     if (compiler.type == CompilerType::UNKNOWN) {
-        return true;
+      return true;
     }
-    
+
     std::string s = standard;
-    std::transform(s.begin(), s.end(), s.begin(), [](unsigned char c) { return std::tolower(c); });
-    
+    std::transform(s.begin(), s.end(), s.begin(),
+                   [](unsigned char c) { return std::tolower(c); });
+
     if (s == "c++latest" || s == "clatest") {
-        return true;
+      return true;
     }
-    
+
     try {
-        auto probe = [&compiler]() -> std::tuple<int, int, int> {
-            std::string exe = !compiler.path.empty() ? compiler.path : compiler.name;
-            if (exe.empty()) return {-1, -1, -1};
-            
-            std::vector<std::vector<std::string>> cmds = {
-                {exe, "--version"}, {exe, "-v"}, {exe, "-dumpversion"}, {exe}
-            };
-            
-            for (auto& cmd : cmds) {
-                try {
-                    std::string out = Utils::safe_execute_command(cmd);
-                    if (out.empty()) continue;
-                    
-                    std::regex ver_re(R"((\d+)\.(\d+)(?:\.(\d+))?)");
-                    std::smatch m;
-                    if (std::regex_search(out, m, ver_re)) {
-                        int major = std::stoi(m[1].str());
-                        int minor = std::stoi(m[2].str());
-                        int patch = 0;
-                        if (m.size() > 3 && m[3].matched) patch = std::stoi(m[3].str());
-                        return {major, minor, patch};
-                    }
-                } catch (...) {}
-            }
-            return {-1, -1, -1};
-        };
+      auto probe = [&compiler]() -> std::tuple<int, int, int> {
+        std::string exe =
+            !compiler.path.empty() ? compiler.path : compiler.name;
+        if (exe.empty())
+          return {-1, -1, -1};
 
-        auto [maj, min, pat] = probe();
-        
-        if (maj < 0) return true;
-        
-        auto cache_key = std::make_tuple(compiler.type, s, maj, min, pat);
-        {
-            std::lock_guard<std::mutex> lock(cache_mutex);
-            auto it = cache.find(cache_key);
-            if (it != cache.end()) {
-                return it->second;
-            }
-        }
-        
-        auto at_least = [&](int M, int m = 0) {
-            if (maj > M) return true;
-            if (maj < M) return false;
-            return min >= m;
-        };
+        std::vector<std::vector<std::string>> cmds = {
+            {exe, "--version"}, {exe, "-v"}, {exe, "-dumpversion"}, {exe}};
 
-        bool supported = true;
-        
-        if (s.rfind("c++", 0) == 0) {
-            if (s == "c++98" || s == "c++03") supported = true;
-            else if (s == "c++11") {
-                if (compiler.type == CompilerType::GCC || compiler.type == CompilerType::GXX)
-                    supported = (maj > 4) || (maj == 4 && min >= 8);
-                else if (compiler.type == CompilerType::CLANG || compiler.type == CompilerType::CLANGXX)
-                    supported = at_least(3, 3);
-                else if (compiler.type == CompilerType::MSVC)
-                    supported = maj >= 19;
-            }
-            else if (s == "c++14") {
-                if (compiler.type == CompilerType::GCC || compiler.type == CompilerType::GXX)
-                    supported = at_least(5, 0);
-                else if (compiler.type == CompilerType::CLANG || compiler.type == CompilerType::CLANGXX)
-                    supported = at_least(3, 4);
-                else if (compiler.type == CompilerType::MSVC)
-                    supported = maj >= 19;
-            }
-            else if (s == "c++17") {
-                if (compiler.type == CompilerType::GCC || compiler.type == CompilerType::GXX)
-                    supported = at_least(7, 0);
-                else if (compiler.type == CompilerType::CLANG || compiler.type == CompilerType::CLANGXX)
-                    supported = at_least(5, 0);
-                else if (compiler.type == CompilerType::MSVC)
-                    supported = (maj == 19 && min >= 10) || (maj > 19);
-            }
-            else if (s == "c++20") {
-                if (compiler.type == CompilerType::GCC || compiler.type == CompilerType::GXX)
-                    supported = at_least(10, 0);
-                else if (compiler.type == CompilerType::CLANG || compiler.type == CompilerType::CLANGXX)
-                    supported = at_least(11, 0);
-                else if (compiler.type == CompilerType::MSVC)
-                    supported = (maj == 19 && min >= 25) || (maj > 19);
-            }
-            else if (s == "c++23") {
-                if (compiler.type == CompilerType::GCC || compiler.type == CompilerType::GXX)
-                    supported = at_least(12, 0);
-                else if (compiler.type == CompilerType::CLANG || compiler.type == CompilerType::CLANGXX)
-                    supported = at_least(13, 0);
-                else if (compiler.type == CompilerType::MSVC)
-                    supported = (maj == 19 && min >= 30) || (maj > 19);
-            }
-        } else if (s.rfind("c", 0) == 0) {
-            if (s == "c99") supported = true;
-            else if (s == "c11") {
-                if (compiler.type == CompilerType::GCC || compiler.type == CompilerType::GXX)
-                    supported = at_least(5, 0);
-                else if (compiler.type == CompilerType::CLANG || compiler.type == CompilerType::CLANGXX)
-                    supported = at_least(3, 4);
-                else if (compiler.type == CompilerType::MSVC)
-                    supported = maj >= 19;
-            }
-            else if (s == "c17" || s == "c18") supported = true;
-            else if (s == "c20" || s == "c23") {
-                if (compiler.type == CompilerType::GCC || compiler.type == CompilerType::GXX)
-                    supported = at_least(11, 0);
-                else if (compiler.type == CompilerType::CLANG || compiler.type == CompilerType::CLANGXX)
-                    supported = at_least(11, 0);
-                else if (compiler.type == CompilerType::MSVC)
-                    supported = (maj == 19 && min >= 30) || (maj > 19);
-            }
-        }
+        for (auto &cmd : cmds) {
+          try {
+            std::string out = Utils::safe_execute_command(cmd);
+            if (out.empty())
+              continue;
 
-        {
-            std::lock_guard<std::mutex> lock(cache_mutex);
-            cache[cache_key] = supported;
+            std::regex ver_re(R"((\d+)\.(\d+)(?:\.(\d+))?)");
+            std::smatch m;
+            if (std::regex_search(out, m, ver_re)) {
+              int major = std::stoi(m[1].str());
+              int minor = std::stoi(m[2].str());
+              int patch = 0;
+              if (m.size() > 3 && m[3].matched)
+                patch = std::stoi(m[3].str());
+              return {major, minor, patch};
+            }
+          } catch (...) {
+          }
         }
-        
-        return supported;
-        
-    } catch (...) {
+        return {-1, -1, -1};
+      };
+
+      auto [maj, min, pat] = probe();
+
+      if (maj < 0)
         return true;
+
+      auto cache_key = std::make_tuple(compiler.type, s, maj, min, pat);
+      {
+        std::lock_guard<std::mutex> lock(cache_mutex);
+        auto it = cache.find(cache_key);
+        if (it != cache.end()) {
+          return it->second;
+        }
+      }
+
+      auto at_least = [&](int M, int m = 0) {
+        if (maj > M)
+          return true;
+        if (maj < M)
+          return false;
+        return min >= m;
+      };
+
+      bool supported = true;
+
+      if (s.rfind("c++", 0) == 0) {
+        if (s == "c++98" || s == "c++03")
+          supported = true;
+        else if (s == "c++11") {
+          if (compiler.type == CompilerType::GCC ||
+              compiler.type == CompilerType::GXX)
+            supported = (maj > 4) || (maj == 4 && min >= 8);
+          else if (compiler.type == CompilerType::CLANG ||
+                   compiler.type == CompilerType::CLANGXX)
+            supported = at_least(3, 3);
+          else if (compiler.type == CompilerType::MSVC)
+            supported = maj >= 19;
+        } else if (s == "c++14") {
+          if (compiler.type == CompilerType::GCC ||
+              compiler.type == CompilerType::GXX)
+            supported = at_least(5, 0);
+          else if (compiler.type == CompilerType::CLANG ||
+                   compiler.type == CompilerType::CLANGXX)
+            supported = at_least(3, 4);
+          else if (compiler.type == CompilerType::MSVC)
+            supported = maj >= 19;
+        } else if (s == "c++17") {
+          if (compiler.type == CompilerType::GCC ||
+              compiler.type == CompilerType::GXX)
+            supported = at_least(7, 0);
+          else if (compiler.type == CompilerType::CLANG ||
+                   compiler.type == CompilerType::CLANGXX)
+            supported = at_least(5, 0);
+          else if (compiler.type == CompilerType::MSVC)
+            supported = (maj == 19 && min >= 10) || (maj > 19);
+        } else if (s == "c++20") {
+          if (compiler.type == CompilerType::GCC ||
+              compiler.type == CompilerType::GXX)
+            supported = at_least(10, 0);
+          else if (compiler.type == CompilerType::CLANG ||
+                   compiler.type == CompilerType::CLANGXX)
+            supported = at_least(11, 0);
+          else if (compiler.type == CompilerType::MSVC)
+            supported = (maj == 19 && min >= 25) || (maj > 19);
+        } else if (s == "c++23") {
+          if (compiler.type == CompilerType::GCC ||
+              compiler.type == CompilerType::GXX)
+            supported = at_least(12, 0);
+          else if (compiler.type == CompilerType::CLANG ||
+                   compiler.type == CompilerType::CLANGXX)
+            supported = at_least(13, 0);
+          else if (compiler.type == CompilerType::MSVC)
+            supported = (maj == 19 && min >= 30) || (maj > 19);
+        }
+      } else if (s.rfind("c", 0) == 0) {
+        if (s == "c99")
+          supported = true;
+        else if (s == "c11") {
+          if (compiler.type == CompilerType::GCC ||
+              compiler.type == CompilerType::GXX)
+            supported = at_least(5, 0);
+          else if (compiler.type == CompilerType::CLANG ||
+                   compiler.type == CompilerType::CLANGXX)
+            supported = at_least(3, 4);
+          else if (compiler.type == CompilerType::MSVC)
+            supported = maj >= 19;
+        } else if (s == "c17" || s == "c18")
+          supported = true;
+        else if (s == "c20" || s == "c23") {
+          if (compiler.type == CompilerType::GCC ||
+              compiler.type == CompilerType::GXX)
+            supported = at_least(11, 0);
+          else if (compiler.type == CompilerType::CLANG ||
+                   compiler.type == CompilerType::CLANGXX)
+            supported = at_least(11, 0);
+          else if (compiler.type == CompilerType::MSVC)
+            supported = (maj == 19 && min >= 30) || (maj > 19);
+        }
+      }
+
+      {
+        std::lock_guard<std::mutex> lock(cache_mutex);
+        cache[cache_key] = supported;
+      }
+
+      return supported;
+
+    } catch (...) {
+      return true;
     }
-}
-  
+  }
+
   static int execute_command(const std::string &command) {
     std::cout << "Executing: " << command << std::endl;
     return std::system(command.c_str());
   }
 
-  
   static std::string
   safe_execute_command(const std::vector<std::string> &args) {
     return SafeCommandExecutor::execute(args);
   }
 
-  
   static bool safe_download_file(const std::string &url,
                                  const fs::path &output_path) {
     return SafeCommandExecutor::download_file(url, output_path);
   }
 
-  
   static bool safe_unzip_file(const fs::path &zip_file,
                               const fs::path &output_dir) {
     return SafeCommandExecutor::unzip_file(zip_file, output_dir);
   }
 
-  
   static bool safe_create_directory(const fs::path &path) {
     return SafeCommandExecutor::safe_create_directory(path);
   }
 
-  
   static fs::path join_paths(const fs::path &base, const std::string &part) {
     return base / part;
   }
 
-  
   static bool safe_write_file(const fs::path &path,
                               const std::string &content) {
     try {
@@ -1034,7 +1085,6 @@ static bool is_standard_supported(const CompilerConfig& compiler,
     }
   }
 
-  
   static std::string safe_read_file(const fs::path &path) {
     try {
       std::ifstream file(path);
@@ -1049,7 +1099,6 @@ static bool is_standard_supported(const CompilerConfig& compiler,
     }
   }
 
-  
   static std::string trim(const std::string &str) {
     auto start = std::find_if_not(str.begin(), str.end(),
                                   [](int c) { return std::isspace(c); });
@@ -1059,7 +1108,6 @@ static bool is_standard_supported(const CompilerConfig& compiler,
     return (start < end) ? std::string(start, end) : std::string();
   }
 
-  
   static json parse_json(const std::string &json_str) {
     try {
       return json::parse(json_str);
@@ -1069,7 +1117,6 @@ static bool is_standard_supported(const CompilerConfig& compiler,
     }
   }
 
-  
   static json read_json_file(const fs::path &path) {
     try {
       std::ifstream file(path);
@@ -1082,7 +1129,7 @@ static bool is_standard_supported(const CompilerConfig& compiler,
       return json();
     }
   }
-    static json read_yaml_file(const fs::path &path) {
+  static json read_yaml_file(const fs::path &path) {
     try {
       YAML::Node yaml = YAML::LoadFile(path.string());
       return yaml2json::convert(yaml);
@@ -1091,7 +1138,7 @@ static bool is_standard_supported(const CompilerConfig& compiler,
       return json();
     }
   }
-    static json parse_yaml(const std::string &yaml_str) {
+  static json parse_yaml(const std::string &yaml_str) {
     try {
       YAML::Node yaml = YAML::Load(yaml_str);
       return yaml2json::convert(yaml);
@@ -1106,16 +1153,17 @@ static bool is_standard_supported(const CompilerConfig& compiler,
       if (!file) {
         return false;
       }
-      file << j.dump(2); 
+      file << j.dump(2);
       return true;
     } catch (const std::exception &e) {
       std::cerr << "JSON file write error: " << e.what() << std::endl;
       return false;
     }
   }
-    static json read_config_file(const fs::path &path) {
+  static json read_config_file(const fs::path &path) {
     std::string extension = path.extension().string();
-    std::transform(extension.begin(), extension.end(), extension.begin(), ::tolower);
+    std::transform(extension.begin(), extension.end(), extension.begin(),
+                   ::tolower);
 
     if (extension == ".yaml" || extension == ".yml") {
       return read_yaml_file(path);
@@ -1129,24 +1177,17 @@ class ILibraryInfoProvider {
 public:
   virtual ~ILibraryInfoProvider() = default;
 
-  
   virtual std::vector<std::string> get_available_libraries() = 0;
 
-  
   virtual std::optional<ThirdPartyLibrary>
   get_library_info(const std::string &lib_name) = 0;
 
-  
   virtual bool refresh_library_info() = 0;
 
-  
   virtual std::string get_provider_name() const = 0;
 
-  
   virtual fs::path get_library_info_path() const = 0;
 };
-
-
 
 class MultiFormatLibraryProvider : public ILibraryInfoProvider {
 private:
@@ -1159,8 +1200,7 @@ public:
   MultiFormatLibraryProvider(const fs::path &info_path,
                              const std::string &url = "")
       : library_info_path_(info_path), download_url_(url) {
-    
-    
+
     refresh_library_info();
   }
 
@@ -1186,7 +1226,6 @@ public:
   bool refresh_library_info() override {
     std::lock_guard<std::mutex> lock(cache_mutex_);
 
-    
     if (!fs::exists(library_info_path_)) {
       if (!download_url_.empty()) {
         if (!download_library_info()) {
@@ -1201,7 +1240,6 @@ public:
       }
     }
 
-    
     std::string extension = library_info_path_.extension().string();
     std::transform(extension.begin(), extension.end(), extension.begin(),
                    ::tolower);
@@ -1258,7 +1296,6 @@ private:
       return false;
     }
 
-    
     json j = Utils::read_json_file(temp_path);
     if (j.is_null() || !j.is_object()) {
       try {
@@ -1284,7 +1321,6 @@ private:
     return true;
   }
 };
-
 
 class JsonLibraryProvider : public ILibraryInfoProvider {
 private:
@@ -1321,7 +1357,6 @@ public:
   bool refresh_library_info() override {
     std::lock_guard<std::mutex> lock(cache_mutex_);
 
-    
     if (!fs::exists(library_info_path_)) {
       if (!download_url_.empty()) {
         if (!download_library_info()) {
@@ -1336,7 +1371,6 @@ public:
       }
     }
 
-    
     json j = Utils::read_json_file(library_info_path_);
     if (j.is_null() || !j.is_object()) {
       std::cerr << "Invalid library info JSON file: " << library_info_path_
@@ -1378,7 +1412,6 @@ private:
       return false;
     }
 
-    
     json j = Utils::read_json_file(temp_path);
     if (j.is_null() || !j.is_object()) {
       fs::remove(temp_path);
@@ -1386,7 +1419,6 @@ private:
       return false;
     }
 
-    
     try {
       if (fs::exists(library_info_path_)) {
         fs::remove(library_info_path_);
@@ -1403,16 +1435,13 @@ private:
   }
 };
 
-
 class CompilerService {
 public:
-  
   static CompilerConfig get_compiler_config() {
     CompilerConfig config;
 
     std::cout << "\n=== Compiler Configuration ===\n";
 
-    
     std::cout << "Select compiler type:\n";
     std::cout << "1. gcc\n";
     std::cout << "2. g++\n";
@@ -1441,16 +1470,12 @@ public:
       config.name = "g++";
     }
 
-    
     config.path = find_compiler_path(config);
 
-    
     config.cppStandard = select_cpp_standard(config);
 
-    
     config.cStandard = select_c_standard(config);
 
-    
     std::cout << "Enter any additional compiler flags (space separated, or "
                  "press Enter for none): ";
     std::string extra_flags;
@@ -1468,7 +1493,6 @@ public:
   }
 
 private:
-  
   static std::string find_compiler_path(CompilerConfig &config) {
     std::vector<std::string> compiler_paths;
 
@@ -1478,7 +1502,6 @@ private:
       compiler_paths = find_compiler_in_path(config.name);
     }
 
-    
     if (compiler_paths.empty()) {
       std::cout << "No " << config.name << " compiler found.\n";
       std::cout << "Enter " << config.name << " compiler path: ";
@@ -1507,18 +1530,15 @@ private:
         return compiler_paths[idx];
       }
     } catch (...) {
-      
     }
 
     return compiler_paths[0];
   }
 
-  
   static std::vector<std::string>
   find_compiler_in_path(const std::string &executable_name) {
     std::vector<std::string> found_paths;
 
-    
     const char *path_env = std::getenv("PATH");
     if (!path_env) {
       return found_paths;
@@ -1526,7 +1546,6 @@ private:
 
     std::string path_str(path_env);
 
-    
 #ifdef _WIN32
     const char delimiter = ';';
     std::string exe_name = executable_name + ".exe";
@@ -1552,12 +1571,11 @@ private:
     return found_paths;
   }
 
-  
   static std::vector<std::string> find_msvc_paths() {
     std::vector<std::string> paths;
 
 #ifdef _WIN32
-    
+
     std::vector<std::string> common_paths = {
         "C:/Program Files/Microsoft Visual Studio/2022/Community/VC/Tools/MSVC",
         "C:/Program Files/Microsoft Visual "
@@ -1588,7 +1606,6 @@ private:
     return paths;
   }
 
-  
   static std::string select_cpp_standard(const CompilerConfig &compiler) {
     std::cout << "Select C++ standard:\n";
     std::cout << "1. C++98\n";
@@ -1617,10 +1634,9 @@ private:
                Utils::is_standard_supported(compiler, "c++23")) {
       return "c++23";
     }
-    return "c++17"; 
+    return "c++17";
   }
 
-  
   static std::string select_c_standard(const CompilerConfig &compiler) {
     std::cout << "Select C standard:\n";
     std::cout << "1. C99\n";
@@ -1642,20 +1658,17 @@ private:
     } else if (choice == "5" && Utils::is_standard_supported(compiler, "c23")) {
       return "c23";
     }
-    return "c17"; 
+    return "c17";
   }
 };
 
-
 class DebuggerService {
 public:
-  
   static DebuggerConfig get_debugger_config() {
     DebuggerConfig config;
 
     std::cout << "\n=== Debugger Configuration ===\n";
 
-    
     std::cout << "Select debugger type:\n";
     std::cout << "1. GDB\n";
     std::cout << "2. LLDB\n";
@@ -1676,14 +1689,12 @@ public:
       config.name = "gdb";
     }
 
-    
     config.path = find_debugger_path(config);
 
     return config;
   }
 
 private:
-  
   static std::string find_debugger_path(DebuggerConfig &config) {
     std::vector<std::string> debugger_paths;
 
@@ -1693,7 +1704,6 @@ private:
       debugger_paths = find_debugger_in_path(config.name);
     }
 
-    
     if (debugger_paths.empty()) {
       std::cout << "No " << config.name << " debugger found.\n";
       std::cout << "Enter " << config.name << " debugger path: ";
@@ -1722,18 +1732,15 @@ private:
         return debugger_paths[idx];
       }
     } catch (...) {
-      
     }
 
     return debugger_paths[0];
   }
 
-  
   static std::vector<std::string>
   find_debugger_in_path(const std::string &executable_name) {
     std::vector<std::string> found_paths;
 
-    
     const char *path_env = std::getenv("PATH");
     if (!path_env) {
       return found_paths;
@@ -1741,7 +1748,6 @@ private:
 
     std::string path_str(path_env);
 
-    
 #ifdef _WIN32
     const char delimiter = ';';
     std::string exe_name = executable_name + ".exe";
@@ -1767,12 +1773,11 @@ private:
     return found_paths;
   }
 
-  
   static std::vector<std::string> find_vs_debugger_paths() {
     std::vector<std::string> paths;
 
 #ifdef _WIN32
-    
+
     std::vector<std::string> common_paths = {
         "C:/Program Files/Microsoft Visual Studio/2022/Community/Common7/IDE",
         "C:/Program Files/Microsoft Visual "
@@ -1797,10 +1802,8 @@ private:
   }
 };
 
-
 class ProjectStructureService {
 public:
-  
   static DirectoryNode get_project_structure(const std::string &project_name) {
     return {
         project_name,
@@ -1813,7 +1816,7 @@ public:
          {"third_party", {}},
          {"docs", {}}}};
   }
-  
+
   static bool use_unicode_symbols;
 
 #if defined(_WIN32)
@@ -1834,12 +1837,10 @@ public:
     GetConsoleScreenBufferInfo(hConsole, &consoleInfo);
     WORD originalAttrs = consoleInfo.wAttributes;
 
-    
     bool result = create_directory_recursive_impl(
         base_path, node, depth, prefix, vertical_line, branch, last_branch,
         space_fill, success_mark, fail_mark, exist_mark);
 
-    
     SetConsoleTextAttribute(hConsole, originalAttrs);
     return result;
   }
@@ -1848,7 +1849,7 @@ public:
                                          const DirectoryNode &node,
                                          int depth = 0,
                                          const std::string &prefix = "") {
-    
+
     if (use_unicode_symbols) {
       const std::string vertical_line = "│";
       const std::string branch = "├── ";
@@ -1878,7 +1879,6 @@ public:
 #endif
 
 private:
-  
   static bool create_directory_recursive_impl(
       const fs::path &base_path, const DirectoryNode &node, int depth,
       const std::string &prefix, const std::string &vertical_line,
@@ -1941,12 +1941,10 @@ class LibraryService {
 private:
   static std::unique_ptr<ILibraryInfoProvider> provider_;
 
-  
   static fs::path get_default_library_info_path() {
-    
+
     std::vector<std::string> extensions = {".json", ".yaml", ".yml"};
 
-    
     for (const auto &ext : extensions) {
       fs::path local_path =
           fs::current_path() / (Constants::LIBRARY_INFO_FILENAME + ext);
@@ -1955,7 +1953,6 @@ private:
       }
     }
 
-    
     const char *home_dir = std::getenv("HOME");
     if (home_dir) {
       for (const auto &ext : extensions) {
@@ -1967,14 +1964,12 @@ private:
       }
     }
 
-    
     return fs::current_path() / (Constants::LIBRARY_INFO_FILENAME + ".json");
   }
 
-  
   static ILibraryInfoProvider &get_provider() {
     if (!provider_) {
-      
+
       fs::path local_info_path = get_default_library_info_path();
       provider_ = std::make_unique<MultiFormatLibraryProvider>(local_info_path);
     }
@@ -1982,7 +1977,6 @@ private:
   }
 
 public:
-  
   static bool configure_library_mirror(const std::string &mirror_url) {
     if (mirror_url.empty()) {
       std::cout << "Clearing library mirror configuration.\n";
@@ -1990,7 +1984,6 @@ public:
       return true;
     }
 
-    
     if (!SafeCommandExecutor::is_valid_url(mirror_url)) {
       std::cerr << "Invalid mirror URL: " << mirror_url << std::endl;
       return false;
@@ -1998,13 +1991,11 @@ public:
 
     std::cout << "Configuring library mirror: " << mirror_url << std::endl;
 
-    
     fs::path local_cache =
         fs::temp_directory_path() / "sln2code_libraries.json";
     auto remote_provider =
         std::make_unique<MultiFormatLibraryProvider>(local_cache, mirror_url);
 
-    
     if (!remote_provider->refresh_library_info()) {
       std::cerr << "Failed to connect to library mirror: " << mirror_url
                 << std::endl;
@@ -2017,7 +2008,6 @@ public:
     return true;
   }
 
-  
   static bool auto_detect_library_info() {
     fs::path detected_path = find_library_info_file();
     if (detected_path.empty()) {
@@ -2030,7 +2020,6 @@ public:
     return provider_->refresh_library_info();
   }
 
-  
   static fs::path find_library_info_file() {
     std::vector<std::string> filenames = {
         Constants::LIBRARY_INFO_FILENAME + ".json",
@@ -2040,7 +2029,6 @@ public:
         "libraries.yaml",
         "libraries.yml"};
 
-    
     for (const auto &filename : filenames) {
       fs::path path = fs::current_path() / filename;
       if (fs::exists(path)) {
@@ -2048,7 +2036,6 @@ public:
       }
     }
 
-    
     const char *home_dir = std::getenv("HOME");
     if (home_dir) {
       fs::path home_path = fs::path(home_dir) / ".sln2code";
@@ -2063,7 +2050,6 @@ public:
     return fs::path();
   }
 
-  
   static bool set_library_info_path(const fs::path &path) {
     if (!fs::exists(path)) {
       std::cerr << "Library info file not found: " << path << std::endl;
@@ -2085,7 +2071,6 @@ public:
     return provider_->refresh_library_info();
   }
 
-  
   static void offer_library_installation(const fs::path &project_path) {
     std::cout << "\nWould you like to add any third-party libraries? [y/N]: ";
     std::string response;
@@ -2101,7 +2086,6 @@ public:
     if (available_libs.empty()) {
       std::cout << "No libraries available from the current provider.\n";
 
-      
       std::cout << "Would you like to configure a library mirror? [y/N]: ";
       std::string mirror_response;
       std::getline(std::cin, mirror_response);
@@ -2114,7 +2098,7 @@ public:
 
         if (!mirror_url.empty()) {
           configure_library_mirror(mirror_url);
-          
+
           available_libs = provider.get_available_libraries();
         }
       }
@@ -2124,14 +2108,10 @@ public:
       }
     }
 
-    std::cout << "\nAvailable libraries:\n";
-    for (size_t i = 0; i < available_libs.size(); ++i) {
-      std::cout << "  " << i + 1 << ". " << available_libs[i] << "\n";
-    }
-
+    // Do not print the available libraries by default. Prompt for name input.
     while (true) {
-      std::cout << "\nEnter library name or number (or 'done' to finish, "
-                   "'list' to show available): ";
+      std::cout << "Enter library name (or 'done' to finish, 'list' to show "
+                   "available): ";
       std::string lib_input;
       std::getline(std::cin, lib_input);
 
@@ -2147,24 +2127,14 @@ public:
         continue;
       }
 
-      std::string lib_name;
-      
-      try {
-        int choice = std::stoi(lib_input);
-        if (choice > 0 && choice <= static_cast<int>(available_libs.size())) {
-          lib_name = available_libs[choice - 1];
-        } else {
-          lib_name = lib_input;
-        }
-      } catch (...) {
-        lib_name = lib_input;
-      }
+      std::string lib_name = lib_input;
+      if (lib_name.empty())
+        continue;
 
       add_third_party_library(project_path, lib_name);
     }
   }
 
-  
   static bool add_third_party_library(const fs::path &project_path,
                                       const std::string &lib_name) {
     static std::set<std::string> installed_libs;
@@ -2179,7 +2149,6 @@ public:
       installed_libs.insert(lib_name);
     }
 
-    
     const fs::path third_party_dir = project_path / "third_party";
     Utils::safe_create_directory(third_party_dir);
 
@@ -2189,7 +2158,6 @@ public:
     if (!lib_info) {
       std::cerr << "Library not found: " << lib_name << std::endl;
 
-      
       auto available_libs = provider.get_available_libraries();
       if (!available_libs.empty()) {
         std::cout << "Available libraries: ";
@@ -2205,12 +2173,11 @@ public:
 
     std::cout << "\nAdding " << lib_info->name << " to project...\n";
 
-    
     fs::path lib_dir = project_path / "third_party" / lib_info->name;
     if (fs::exists(lib_dir)) {
       std::cout << "Library directory already exists. Skipping download.\n";
     } else {
-      
+
       if (!download_and_extract_library(project_path, *lib_info)) {
         std::cerr << "Failed to download and extract " << lib_info->name
                   << std::endl;
@@ -2218,7 +2185,6 @@ public:
       }
     }
 
-    
     auto future_guide = std::async(std::launch::async, [&]() {
       generate_library_guide(project_path, *lib_info);
     });
@@ -2227,7 +2193,6 @@ public:
       update_cmake_with_library(project_path, *lib_info);
     });
 
-    
     for (const auto &dep : lib_info->dependencies) {
       std::cout << "Installing dependency: " << dep << "\n";
       if (!add_third_party_library(project_path, dep)) {
@@ -2236,7 +2201,6 @@ public:
       }
     }
 
-    
     future_guide.get();
     future_cmake.get();
 
@@ -2247,7 +2211,6 @@ public:
     return true;
   }
 
-  
   static bool download_and_extract_library(const fs::path &project_path,
                                            const ThirdPartyLibrary &lib) {
     const fs::path third_party_dir = project_path / "third_party";
@@ -2256,13 +2219,11 @@ public:
     std::cout << "\nDownloading " << lib.name << " from " << lib.downloadUrl
               << "...\n";
 
-    
     if (!SafeCommandExecutor::download_file(lib.downloadUrl, zip_file)) {
       std::cerr << "Failed to download " << lib.name << std::endl;
       return false;
     }
 
-    
     if (!lib.sha256.empty()) {
       std::cout << "Verifying SHA256 checksum...\n";
       try {
@@ -2285,15 +2246,13 @@ public:
 
     std::cout << "Extracting " << lib.name << "...\n";
 
-    
     if (!SafeCommandExecutor::unzip_file(zip_file, third_party_dir)) {
       std::cerr << "Failed to extract " << lib.name << std::endl;
       return false;
     }
 
-    
     std::thread([zip_file]() {
-      std::this_thread::sleep_for(std::chrono::seconds(1)); 
+      std::this_thread::sleep_for(std::chrono::seconds(1));
       try {
         if (fs::exists(zip_file)) {
           fs::remove(zip_file);
@@ -2307,7 +2266,6 @@ public:
     return true;
   }
 
-  
   static void generate_library_guide(const fs::path &project_path,
                                      const ThirdPartyLibrary &lib) {
     const fs::path docs_dir = project_path / "docs";
@@ -2348,12 +2306,11 @@ public:
     Utils::safe_write_file(guide_path, content);
   }
 
-  
   static void update_cmake_with_library(const fs::path &project_path,
                                         const ThirdPartyLibrary &lib) {
     const fs::path cmake_path = project_path / "CMakeLists.txt";
     if (!fs::exists(cmake_path)) {
-      return; 
+      return;
     }
 
     std::string current_content = Utils::safe_read_file(cmake_path);
@@ -2363,7 +2320,6 @@ public:
       return;
     }
 
-    
     std::ofstream cmake(cmake_path, std::ios::app);
     if (cmake) {
       cmake << "\n# " << lib.name << " Configuration\n";
@@ -2373,7 +2329,6 @@ public:
     }
   }
 
-  
   static void list_available_libraries() {
     auto &provider = get_provider();
     auto libraries = provider.get_available_libraries();
@@ -2389,7 +2344,6 @@ public:
     }
   }
 
-  
   static bool refresh_library_info() {
     auto &provider = get_provider();
     std::cout << "Refreshing library information from: "
@@ -2397,19 +2351,16 @@ public:
     return provider.refresh_library_info();
   }
 
-  
   static fs::path get_library_info_path() {
     auto &provider = get_provider();
     return provider.get_library_info_path();
   }
 };
 
-
 std::unique_ptr<ILibraryInfoProvider> LibraryService::provider_ = nullptr;
 
 class ProjectGenerator {
 public:
-  
   static void generate_project_files(const fs::path &project_path,
                                      const std::string &project_name,
                                      const CompilerConfig &compiler,
@@ -2417,7 +2368,6 @@ public:
     const fs::path vscode_dir = project_path / ".vscode";
     Utils::safe_create_directory(vscode_dir);
 
-    
     std::vector<std::future<void>> futures;
 
     futures.push_back(std::async(std::launch::async, [&]() {
@@ -2450,14 +2400,12 @@ public:
       generate_readme(project_path, project_name);
     }));
 
-    
     for (auto &future : futures) {
       future.get();
     }
   }
 
 private:
-  
   static void generate_c_cpp_properties(const fs::path &vscode_dir,
                                         const CompilerConfig &compiler) {
     std::string intelliSenseMode = get_intellisense_mode(compiler.type);
@@ -2511,7 +2459,7 @@ private:
   }
 
   static std::string get_intellisense_mode(CompilerType type) {
-    
+
     std::string platform;
     std::string architecture;
 
@@ -2526,7 +2474,7 @@ private:
 #elif defined(_M_ARM64) || defined(__aarch64__)
     architecture = "arm64";
 #else
-    architecture = "x64"; 
+    architecture = "x64";
 #endif
 #elif defined(__APPLE__)
     platform = "macos";
@@ -2535,7 +2483,7 @@ private:
 #elif defined(__aarch64__) || defined(__arm64__)
     architecture = "arm64";
 #else
-    architecture = "arm64"; 
+    architecture = "arm64";
 #endif
 #elif defined(__linux__)
     platform = "linux";
@@ -2548,14 +2496,13 @@ private:
 #elif defined(__arm__)
     architecture = "arm";
 #else
-    architecture = "x64"; 
+    architecture = "x64";
 #endif
 #else
     platform = "linux";
-    architecture = "x64"; 
+    architecture = "x64";
 #endif
 
-    
     switch (type) {
     case CompilerType::CLANG:
     case CompilerType::CLANGXX:
@@ -2571,7 +2518,6 @@ private:
     }
   }
 
-  
   static void generate_tasks_json(const fs::path &vscode_dir,
                                   const std::string &project_name,
                                   const CompilerConfig &compiler) {
@@ -2591,12 +2537,10 @@ private:
                 "-I${workspaceFolder}/third_party",)";
     }
 
-    
     for (const auto &arg : compiler.extraArgs) {
       args += "\n                \"" + arg + "\",";
     }
 
-    
     args += R"(
                 "-L${workspaceFolder}/third_party",)";
 
@@ -2642,7 +2586,6 @@ private:
     Utils::safe_write_file(vscode_dir / "tasks.json", content);
   }
 
-  
   static void generate_launch_json(const fs::path &vscode_dir,
                                    const std::string &project_name,
                                    const CompilerConfig &compiler,
@@ -2706,7 +2649,6 @@ private:
     Utils::safe_write_file(vscode_dir / "launch.json", content);
   }
 
-  
   static void generate_settings_json(const fs::path &vscode_dir) {
     std::string content = R"({
     "files.associations": {
@@ -2723,7 +2665,6 @@ private:
     Utils::safe_write_file(vscode_dir / "settings.json", content);
   }
 
-  
   static void generate_cmake_file(const fs::path &project_path,
                                   const std::string &project_name,
                                   const CompilerConfig &compiler) {
@@ -2759,7 +2700,6 @@ add_executable()" + project_name +
 target_compile_options()" +
                           project_name + R"( PRIVATE)";
 
-    
     for (const auto &arg : compiler.extraArgs) {
       content += "\n    " + arg;
     }
@@ -2777,7 +2717,6 @@ install(DIRECTORY include/ DESTINATION include)
     Utils::safe_write_file(project_path / "CMakeLists.txt", content);
   }
 
-  
   static void generate_main_cpp(const fs::path &project_path,
                                 const std::string &project_name) {
     const fs::path src_dir = project_path / "src";
@@ -2797,7 +2736,6 @@ int main() {
     Utils::safe_write_file(src_dir / "main.cpp", content);
   }
 
-  
   static void generate_gitignore(const fs::path &project_path) {
     std::string content = R"(# Build artifacts
 build/
@@ -2833,7 +2771,6 @@ Thumbs.db
     Utils::safe_write_file(project_path / ".gitignore", content);
   }
 
-  
   static void generate_readme(const fs::path &project_path,
                               const std::string &project_name) {
     std::string content = R"(# )" + project_name + R"(
@@ -3027,7 +2964,6 @@ public:
   }
 };
 
-
 void print_logo() {
   std::cout << "  ____  _     _   _ ____   ____          _      " << "\n"
             << " / ___|| |   | \\ | |___ \\ / ___|___   __| | ___ " << "\n"
@@ -3040,7 +2976,7 @@ int main(int argc, char *argv[]) {
   curl_global_init(CURL_GLOBAL_DEFAULT);
 
   try {
-    
+
     CommandLineParser::Options options = CommandLineParser::parse(argc, argv);
 
     if (options.show_help) {
@@ -3054,7 +2990,6 @@ int main(int argc, char *argv[]) {
       return 0;
     }
 
-    
     if (options.list_libraries) {
       print_logo();
       LibraryService::list_available_libraries();
@@ -3072,7 +3007,6 @@ int main(int argc, char *argv[]) {
       return 0;
     }
 
-    
     if (!options.library_mirror_url.empty()) {
       if (!LibraryService::configure_library_mirror(
               options.library_mirror_url)) {
@@ -3081,7 +3015,6 @@ int main(int argc, char *argv[]) {
       }
     }
 
-    
     if (options.project_name == Constants::DEFAULT_PROJECT_NAME) {
       print_logo();
       CommandLineParser::print_version();
@@ -3105,11 +3038,9 @@ int main(int argc, char *argv[]) {
       }
     }
 
-    
     const fs::path project_full_path =
         fs::path(options.base_path) / options.project_name;
 
-    
     if (fs::exists(project_full_path)) {
       std::cout << "Warning: Directory already exists: " << project_full_path
                 << "\n";
@@ -3127,7 +3058,6 @@ int main(int argc, char *argv[]) {
     std::cout << "\nCreating project \"" << options.project_name << "\" at:\n"
               << "  " << project_full_path << "\n\n";
 
-    
     if (options.compiler.name.empty()) {
       options.compiler = CompilerService::get_compiler_config();
     } else {
@@ -3135,7 +3065,6 @@ int main(int argc, char *argv[]) {
                 << options.compiler.path << ")\n";
     }
 
-    
     if (options.debugger.name.empty()) {
       options.debugger = DebuggerService::get_debugger_config();
     } else {
@@ -3146,7 +3075,6 @@ int main(int argc, char *argv[]) {
     std::cout << "C++ Standard: " << options.compiler.cppStandard << "\n";
     std::cout << "C Standard: " << options.compiler.cStandard << "\n\n";
 
-    
     DirectoryNode project_structure =
         ProjectStructureService::get_project_structure(options.project_name);
     bool success = ProjectStructureService::create_directory_recursive(
@@ -3157,7 +3085,6 @@ int main(int argc, char *argv[]) {
       return 1;
     }
 
-    
     if (!options.libraries_to_install.empty()) {
       for (const auto &lib_name : options.libraries_to_install) {
         LibraryService::add_third_party_library(project_full_path, lib_name);
@@ -3166,7 +3093,6 @@ int main(int argc, char *argv[]) {
       LibraryService::offer_library_installation(project_full_path);
     }
 
-    
     ProjectGenerator::generate_project_files(
         project_full_path, options.project_name, options.compiler,
         options.debugger);
