@@ -1,4 +1,4 @@
-/*Created by Macintosh-MaiSensei on 2026/2/18.*/
+/*Created by Macintosh-MaiSensei on 2026/2/16.*/
 /*Version 1.0.4 Beta*/
 #include "yaml2json.hpp"
 #include <algorithm>
@@ -2281,6 +2281,9 @@ public:
     }
   }
 
+  static bool run_command_show(const std::string &cmd);
+  static std::string sanitize_for_shell(const std::string &input);
+
   static bool add_third_party_library(const fs::path &project_path,
                                       const std::string &lib_name) {
     static std::set<std::string> installed_libs;
@@ -2313,6 +2316,37 @@ public:
           std::cout << available_libs[i];
         }
         std::cout << "\n";
+      }
+      std::cout << "Would you like to try installing '" << lib_name
+                << "' using vcpkg? [y/N]: ";
+      std::string vresp;
+      std::getline(std::cin, vresp);
+      if (!vresp.empty() && (vresp[0] == 'y' || vresp[0] == 'Y')) {
+        fs::path cwd = fs::current_path();
+        fs::path local_vcpkg = cwd / "vcpkg";
+#ifdef _WIN32
+        fs::path vcpkg_exec = local_vcpkg / "vcpkg.exe";
+#else
+        fs::path vcpkg_exec = local_vcpkg / "vcpkg";
+#endif
+
+        std::string sanitized = sanitize_for_shell(lib_name);
+
+        std::string cmd;
+        if (fs::exists(vcpkg_exec)) {
+          cmd = std::string("\"") + vcpkg_exec.string() + "\" install \"" +
+                sanitized + "\"";
+        } else {
+          cmd = "vcpkg install \"" + sanitized + "\"";
+        }
+
+        if (run_command_show(cmd)) {
+          std::cout << "vcpkg install finished for " << lib_name << ".\n";
+          return true;
+        } else {
+          std::cerr << "vcpkg install failed for " << lib_name << ".\n";
+          return false;
+        }
       }
       return false;
     }
@@ -3127,6 +3161,22 @@ static bool run_command_show(const std::string &cmd) {
     return false;
   }
   return true;
+}
+
+static std::string sanitize_for_shell(const std::string &input) {
+  std::string out;
+  for (char c : input) {
+    if (std::isalnum((unsigned char)c) || c == '-' || c == '_' || c == '+' ||
+        c == ':' || c == '/') {
+      out.push_back(c);
+    } else if (c == ' ') {
+      out.push_back('\\');
+      out.push_back(' ');
+    } else {
+      out.push_back('_');
+    }
+  }
+  return out;
 }
 
 static bool install_vcpkg_in_dir(const fs::path &root) {
