@@ -1,4 +1,4 @@
-/*Created by Macintosh-MaiSensei on 2026/2/16.*/
+/*Created by Macintosh-MaiSensei on 2026/2/18.*/
 /*Version 1.0.4 Beta*/
 #include "yaml2json.hpp"
 #include <algorithm>
@@ -137,7 +137,7 @@ private:
 
     for (const auto &[placeholder, value] : replacements) {
       if (value.empty())
-        continue; 
+        continue;
       size_t pos = 0;
       while ((pos = result.find(placeholder, pos)) != std::string::npos) {
         result.replace(pos, placeholder.length(), value);
@@ -2255,7 +2255,6 @@ public:
       }
     }
 
-    // Do not print the available libraries by default. Prompt for name input.
     while (true) {
       std::cout << "Enter library name (or 'done' to finish, 'list' to show "
                    "available): ";
@@ -3120,6 +3119,60 @@ void print_logo() {
             << " |____/|_____|_| \\_|_____|\\____\\___/ \\__,_|\\___|" << "\n";
 }
 
+static bool run_command_show(const std::string &cmd) {
+  std::cout << "Running: " << cmd << "\n";
+  int rc = std::system(cmd.c_str());
+  if (rc != 0) {
+    std::cerr << "Command failed with exit code " << rc << "\n";
+    return false;
+  }
+  return true;
+}
+
+static bool install_vcpkg_in_dir(const fs::path &root) {
+#ifdef _WIN32
+  std::string clone_cmd =
+      "git clone https://github.com/microsoft/vcpkg.git \"" + root.string() +
+      "/vcpkg\"";
+  if (!run_command_show(clone_cmd))
+    return false;
+  std::string bootstrap =
+      "cd \"" + (root / "vcpkg").string() + "\" && \\" + "bootstrap-vcpkg.bat";
+  return run_command_show(bootstrap);
+#else
+  std::string clone_cmd =
+      "git clone https://github.com/microsoft/vcpkg.git \"" + root.string() +
+      "/vcpkg\"";
+  if (!run_command_show(clone_cmd))
+    return false;
+  std::string bootstrap =
+      "cd \"" + (root / "vcpkg").string() + "\" && ./bootstrap-vcpkg.sh";
+  return run_command_show(bootstrap);
+#endif
+}
+
+static void ensure_vcpkg_available() {
+  fs::path cwd = fs::current_path();
+  fs::path vcpkg_dir = cwd / "vcpkg";
+  if (fs::exists(vcpkg_dir)) {
+    return;
+  }
+  std::cout << "vcpkg not found in current directory (" << cwd
+            << ") . Install vcpkg? (y/N): ";
+  std::string ans;
+  std::getline(std::cin, ans);
+  if (!ans.empty() && (ans[0] == 'y' || ans[0] == 'Y')) {
+    std::cout << "Installing vcpkg into " << vcpkg_dir << " ...\n";
+    if (!install_vcpkg_in_dir(cwd)) {
+      std::cerr << "vcpkg installation failed.\n";
+    } else {
+      std::cout << "vcpkg installed successfully.\n";
+    }
+  } else {
+    std::cout << "Skipping vcpkg installation.\n";
+  }
+}
+
 int main(int argc, char *argv[]) {
   curl_global_init(CURL_GLOBAL_DEFAULT);
 
@@ -3162,6 +3215,8 @@ int main(int argc, char *argv[]) {
         return 1;
       }
     }
+
+    ensure_vcpkg_available();
 
     if (options.project_name == Constants::DEFAULT_PROJECT_NAME) {
       print_logo();
